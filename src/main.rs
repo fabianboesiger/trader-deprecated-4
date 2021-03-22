@@ -18,8 +18,8 @@ async fn main() {
             1,
         ));
 
-    Historical::new(true).run(&mut strategy).await;
-    //Binance::new(true).await.run(&mut Duplicated::new(Interval::new(Custom::new(), 1000 * 60))).await;
+    //Historical::new(true).run(&mut strategy).await;
+    Binance::new(true).await.run(&mut Duplicated::new(Interval::new(Custom::new(), 1000 * 60))).await;
 
     println!("{}", strategy);
 }
