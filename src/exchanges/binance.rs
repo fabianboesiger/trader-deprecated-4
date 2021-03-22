@@ -39,6 +39,8 @@ pub struct Binance {
 
 impl Binance {
     pub async fn new(sandbox: bool) -> Self {
+        dotenv::dotenv().ok();
+
         let exchange = OpenLimitsBinance::new(BinanceParameters {
                 sandbox,
                 credentials: Some(BinanceCredentials {
@@ -77,8 +79,6 @@ impl Binance {
 #[async_trait]
 impl<S: Strategy + 'static> Exchange<S> for Binance {
     async fn run(mut self, strategy: &mut S) {
-        dotenv::dotenv().ok();
-
         let (tx, mut rx) = mpsc::unbounded_channel();
         let sandbox = self.sandbox;
 
@@ -172,7 +172,7 @@ impl Binance {
             .unwrap_or(Decimal::zero());
 
         // TODO: Remove
-        let balance = Decimal::from_f32(20.0).unwrap();
+        let balance = Decimal::from_f32(100.0).unwrap();
         
         if balance > Decimal::zero() {
             let buy_order = self.exchange.limit_buy(&OpenLimitOrderRequest {
