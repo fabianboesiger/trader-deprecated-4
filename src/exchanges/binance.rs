@@ -40,8 +40,6 @@ pub struct Binance {
 
 impl Binance {
     pub async fn new(markets: Vec<&str>, sandbox: bool) -> Self {
-        dotenv::dotenv().ok();
-
         log::info!("Connecting to exchange.");
 
         let exchange = OpenLimitsBinance::new(BinanceParameters {

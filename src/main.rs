@@ -10,7 +10,9 @@ type Market = String;
 
 #[tokio::main]
 async fn main() {
+    dotenv::dotenv().ok();
     pretty_env_logger::init();
+    log::info!("Starting trader.");
 
     /* BACKTEST STRATEGY
     let mut strategy = Multi::new()

@@ -20,8 +20,6 @@ impl Historical {
 #[async_trait]
 impl<S: Strategy + 'static> Exchange<S> for Historical {
     async fn run(self, strategy: &mut S) {
-        dotenv::dotenv().ok();
-
         let uri = std::env::var("DATABASE_URL").expect("Couldn't get DATABASE_URL.");
         let pool = PgPool::connect(&uri).await.unwrap();
 
