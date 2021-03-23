@@ -22,12 +22,12 @@ impl Strategy for Random {
     fn run(&mut self, Trade { market, price, .. }: Trade) -> Option<Order> {
         self.stdev.run(price);
 
-        if rand::random::<f32>() < 0.1f32 {
+        if rand::random::<f32>() < 1f32 {
             Some(Order {
                 market,
                 price,
-                take_profit: Some(price + 1.0 * self.stdev.get()),
-                stop_loss: Some(price - 1.0 * self.stdev.get()),
+                take_profit: Some(price * 1.01),
+                stop_loss: Some(price * 0.99),
                 side: Side::Buy,
             })
         } else {
