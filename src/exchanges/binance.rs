@@ -93,7 +93,7 @@ impl Binance {
 
         let stream = OpenLimitsWs {
             websocket: BinanceWebsocket::new(if self.sandbox {
-                BinanceParameters::sandbox()
+                BinanceParameters::prod()
             } else {
                 BinanceParameters::prod()
             })
