@@ -26,8 +26,7 @@ async fn main() {
     Historical::new(true).run(&mut strategy).await;
     println!("{}", strategy);
     */
-    
-    /* LIVE STRATEGY
+
     let markets = vec![
         "BTCUSDT",
         "ETHUSDT",
@@ -42,22 +41,5 @@ async fn main() {
         "DOTUSDT"
     ];
     Binance::new(markets, true).await.run(&mut Duplicated::new(Interval::new(Custom::new(), 1000 * 60))).await;
-    */
-    
-    /* TESTING STRATEGY */
-    let markets = vec![
-        "BTCUSDT",
-        "ETHUSDT",
-        "CHZUSDT",
-        "BNBUSDT",
-        "DOGEUSDT",
-        "ADAUSDT",
-        "BCHUSDT",
-        "XRPUSDT",
-        "LTCUSDT",
-        "EOSUSDT",
-        "DOTUSDT"
-    ];
-    Binance::new(markets, true).await.run(&mut Duplicated::new(Interval::new(Random::new(), 1000 * 60))).await;
     
 }
