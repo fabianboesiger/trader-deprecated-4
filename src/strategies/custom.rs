@@ -21,7 +21,7 @@ impl Custom {
             val: Val::new(200.0, 2000.0),
             diff: Ema::new(40.0),
             diff_stdev: Stdev::new(200.0),
-            macd: Macd::new(200.0, 400.0, 70.0),
+            macd: Macd::new(100.0, 200.0, 50.0),
             stdev: Stdev::new(200.0),
             was_undervalued: false,
         }

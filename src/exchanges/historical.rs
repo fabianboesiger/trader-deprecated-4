@@ -58,7 +58,7 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                     timestamp/1000/60 AS timestamp
                 FROM trades
                 WHERE market = ANY($1)
-                AND timestamp > EXTRACT(EPOCH FROM (NOW() - INTERVAL '1 DAY')) * 1000
+                AND timestamp > EXTRACT(EPOCH FROM (NOW() - INTERVAL '2 DAYS')) * 1000
                 GROUP BY market, timestamp/1000/60)
                 SELECT
                     market AS "market!",
@@ -68,21 +68,12 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                 FROM grouped
                 ORDER BY timestamp ASC"#,
                 &vec![
-                    "BTCUSDT",
-                    "ETHUSDT",
-                    "CHZUSDT",
-                    "BNBUSDT",
-                    "DOGEUSDT",
-                    "ADAUSDT",
-                    "BCHUSDT",
-                    "XRPUSDT",
-                    "LTCUSDT",
-                    "EOSUSDT",
-                    "DOTUSDT"
+                    "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT",
+                    "XRPUSDT", "LTCUSDT", "EOSUSDT", "DOTUSDT"
                 ]
-                    .into_iter()
-                    .map(String::from)
-                    .collect::<Vec<String>>()
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<String>>()
             )
             .fetch_all(&pool)
             .await

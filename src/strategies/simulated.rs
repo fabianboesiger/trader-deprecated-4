@@ -136,7 +136,7 @@ impl<S: Strategy> fmt::Display for Simulated<S> {
                      buy_price,
                      sell_price,
                      ..
-                 }| (sell_price / buy_price * (1.0 - self.fee) - 1.0),
+                 }| (sell_price / buy_price * (1.0 - 2.0 * self.fee) - 1.0),
             )
             .sum::<f32>()
             / self.concurrency as f32

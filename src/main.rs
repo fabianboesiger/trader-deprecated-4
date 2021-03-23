@@ -10,16 +10,52 @@ type Market = String;
 
 #[tokio::main]
 async fn main() {
+    pretty_env_logger::init();
+
+    /* BACKTEST STRATEGY
     let mut strategy = Multi::new()
         .with(Simulated::new(Hold::new(), 0.001, 11))
         .with(Simulated::new(
             Duplicated::new(Interval::new(Custom::new(), 1000 * 60)),
             0.001,
-            1,
+            3,
         ));
 
-    //Historical::new(true).run(&mut strategy).await;
-    Binance::new(true).await.run(&mut Duplicated::new(Interval::new(Custom::new(), 1000 * 60))).await;
-
+    Historical::new(true).run(&mut strategy).await;
     println!("{}", strategy);
+    */
+    
+    /* LIVE STRATEGY
+    let markets = vec![
+        "BTCUSDT",
+        "ETHUSDT",
+        "CHZUSDT",
+        "BNBUSDT",
+        "DOGEUSDT",
+        "ADAUSDT",
+        "BCHUSDT",
+        "XRPUSDT",
+        "LTCUSDT",
+        "EOSUSDT",
+        "DOTUSDT"
+    ];
+    Binance::new(markets, true).await.run(&mut Duplicated::new(Interval::new(Custom::new(), 1000 * 60))).await;
+    */
+    
+    /* TESTING STRATEGY */
+    let markets = vec![
+        "BTCUSDT",
+        "ETHUSDT",
+        "CHZUSDT",
+        "BNBUSDT",
+        "DOGEUSDT",
+        "ADAUSDT",
+        "BCHUSDT",
+        "XRPUSDT",
+        "LTCUSDT",
+        "EOSUSDT",
+        "DOTUSDT"
+    ];
+    Binance::new(markets, true).await.run(&mut Duplicated::new(Interval::new(Random::new(), 1000 * 60))).await;
+    
 }
