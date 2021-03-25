@@ -14,7 +14,6 @@ async fn main() {
     pretty_env_logger::init();
     log::info!("Starting trader.");
 
-    /*
     let mut strategy = Multi::new()
         .with(Simulated::new(Hold::new(), 0.001, 11))
         .with(Simulated::new(
@@ -25,9 +24,8 @@ async fn main() {
 
     Historical::new(true).run(&mut strategy).await;
     println!("{}", strategy);
-    */
     
-    
+    /* 
     let markets = vec![
         "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
         "LTCUSDT", "EOSUSDT", "DOTUSDT",
@@ -38,5 +36,5 @@ async fn main() {
             Random::new(),
             1000 * 60,
         )))
-        .await;
+        .await;*/
 }

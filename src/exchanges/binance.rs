@@ -18,7 +18,7 @@ use openlimits::{
     shared::Result as OpenLimitsResult,
 };
 use rust_decimal::prelude::*;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use std::{collections::HashMap};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::{sleep, timeout, Duration};
@@ -60,18 +60,23 @@ impl Positions {
         
     }
 
-    fn update_price(&self, market: Market, price: Decimal) {
-        self.0.lock().unwrap().entry(market).or_default().price = price;
+    async fn update_price(&self, market: Market, price: Decimal) {
+        self.0.lock().await.entry(market).or_default().price = price;
     }
 
-    fn update_quantity(&self, market: Market, quantity: Decimal) {
-        self.0.lock().unwrap().entry(market).or_default().quantity = quantity;
+    async fn update_quantity(&self, market: Market, quantity: Decimal) {
+        self.0.lock().await.entry(market).or_default().quantity = quantity;
     }
 
 
-    fn value(&self) -> Decimal {
-        self.0.lock().unwrap().values().map(Position::value).sum()
+    async fn value(&self) -> Decimal {
+        self.0.lock().await.values().map(Position::value).sum()
     }
+    /*
+    async fn update_positions(&self, exchange: &OpenLimitsBinance) -> Decimal {
+        let guard = self.0.lock().await;
+
+    }*/
 }
 
 struct FilteredOrder {
@@ -343,7 +348,7 @@ impl Binance {
             self.positions.update_price(
                 trade.market.clone(),
                 Decimal::from_f32(trade.price).unwrap(),
-            );
+            ).await;
 
             if let Some(order) = strategy.run(trade) {
                 if timestamp as u64 >= self.start + 1000 * 60 * 200 {
@@ -369,7 +374,9 @@ impl Binance {
         let balances = self.exchange.get_account_balances(None).await?;
         let incr = pair.quote_increment.normalize();
 
-        
+        for balance in &balances {
+            self.positions.update_quantity(format!("{}USDT", balance.asset), balance.total).await;
+        }
 
         let quote_balance = balances
             .iter()
@@ -387,7 +394,7 @@ impl Binance {
 
         if base_balance * price < Decimal::new(10, 0) {
             //let total = self.positions.value();
-            let min_investment = Decimal::from_f32(40.0).unwrap();
+            let min_investment = self.positions.value().await - Decimal::new(1, 0);
             let fraction_investment = quote_balance / min_investment;
             let investment = if fraction_investment >= Decimal::new(2, 0) {
                 min_investment
