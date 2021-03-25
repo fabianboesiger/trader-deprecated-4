@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::stream::{BoxStream, StreamExt};
 use openlimits::{
     binance::{
-        model::SymbolFilter, Binance as OpenLimitsBinance, BinanceCredentials, BinanceParameters,
+        model::{SymbolFilter, websocket::{BinanceWebsocketMessage, UserOrderUpdate}}, Binance as OpenLimitsBinance, BinanceCredentials, BinanceParameters,
         BinanceWebsocket,
     },
     exchange::{Exchange as OpenLimitsExchange, ExchangeAccount},
@@ -23,24 +23,27 @@ use std::{collections::HashMap};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::{sleep, timeout, Duration};
 
-enum Status {
+type OrderId = String;
+
+enum State {
     Wait,
-    Buy,
+    Buy(OrderId),
     Hold,
     Sell,
 }
 
-impl Default for Status {
-    fn default() -> Self {
-        Status::Wait
+impl Default for State {
+    fn default() -> State {
+        State::Wait
     }
 }
 
 #[derive(Default)]
 struct Position {
-    status: Status,
+    state: State,
     price: Decimal,
     quantity: Decimal,
+    order: Option<FilteredOrder>,
 }
 
 impl Position {
@@ -53,6 +56,10 @@ impl Position {
 struct Positions(Mutex<HashMap<Market, Position>>);
 
 impl Positions {
+    fn enter(&self, market: Market, order: FilteredOrder) {
+        
+    }
+
     fn update_price(&self, market: Market, price: Decimal) {
         self.0.lock().unwrap().entry(market).or_default().price = price;
     }
@@ -60,6 +67,7 @@ impl Positions {
     fn update_quantity(&self, market: Market, quantity: Decimal) {
         self.0.lock().unwrap().entry(market).or_default().quantity = quantity;
     }
+
 
     fn value(&self) -> Decimal {
         self.0.lock().unwrap().values().map(Position::value).sum()
@@ -187,6 +195,7 @@ pub struct Binance {
     markets: Vec<Market>,
     exchange: OpenLimitsBinance,
     filters: HashMap<Market, Filters>,
+    start: u64,
 }
 
 impl Binance {
@@ -206,7 +215,9 @@ impl Binance {
 
         log::info!("Getting exchange info.");
 
+
         let inner = exchange.inner_client().unwrap();
+        let start = inner.get_server_time().await.unwrap().server_time;
         let info = inner.get_exchange_info().await.unwrap();
         let filters = info
             .symbols
@@ -214,7 +225,9 @@ impl Binance {
             .map(
                 |openlimits::binance::model::Symbol {
                      symbol, filters, ..
-                 }| (symbol, Filters(filters)),
+                 }| {
+                    (symbol, Filters(filters))
+                 },
             )
             .collect();
 
@@ -235,6 +248,7 @@ impl Binance {
             markets: markets.into_iter().map(String::from).collect(),
             exchange,
             filters,
+            start,
         }
     }
 }
@@ -305,6 +319,12 @@ impl Binance {
                                 tx.send(trade).unwrap();
                             }
                         }
+                        WebSocketResponse::Raw(BinanceWebsocketMessage::UserOrderUpdate(UserOrderUpdate {
+                            order_status,
+                            ..
+                        })) => {
+
+                        }
                         _ => (),
                     }
                 }
@@ -318,13 +338,18 @@ impl Binance {
 
     async fn consume_trades(&self, mut rx: UnboundedReceiver<Trade>, strategy: &mut Strategy) {
         while let Some(trade) = rx.recv().await {
+            let timestamp = trade.timestamp;
+
             self.positions.update_price(
                 trade.market.clone(),
                 Decimal::from_f32(trade.price).unwrap(),
             );
+
             if let Some(order) = strategy.run(trade) {
-                if let Err(err) = self.order(order).await {
-                    log::warn!("Error occured during order: {:#?}", err);
+                if timestamp as u64 >= self.start + 1000 * 60 * 200 {
+                    if let Err(err) = self.order(order).await {
+                        log::warn!("Error occured during order: {:#?}", err);
+                    }
                 }
             }
         }
@@ -333,71 +358,92 @@ impl Binance {
     async fn order(&self, order: Order) -> OpenLimitsResult<()> {
         log::info!("Requesting order {}.", order);
 
+        //let filters = self.filters.get(&order.market).unwrap();
+        //filters.apply(order, quantity).unwrap();
+
         let price = Decimal::from_f32(order.price).unwrap();
         let take_profit = Decimal::from_f32(order.take_profit.unwrap()).unwrap();
         let stop_loss = Decimal::from_f32(order.stop_loss.unwrap()).unwrap();
 
+        let pair = self.exchange.get_pair(&order.market).await?.read()?;
         let balances = self.exchange.get_account_balances(None).await?;
+        let incr = pair.quote_increment.normalize();
 
-        let balance = balances
+        
+
+        let quote_balance = balances
             .iter()
-            .filter(|balance| balance.asset == "USDT")
+            .filter(|balance| balance.asset == pair.quote)
             .map(|balance| balance.free)
             .next()
             .unwrap_or(Decimal::zero());
 
-        let pair = self.exchange.get_pair(&order.market).await?.read()?;
-        let incr = pair.quote_increment;
+        let base_balance = balances
+            .iter()
+            .filter(|balance| balance.asset == pair.base)
+            .map(|balance| balance.free)
+            .next()
+            .unwrap_or(Decimal::zero());
 
-        let total = self.positions.value();
-        let investment = total / Decimal::new(3, 0);
+        if base_balance * price < Decimal::new(10, 0) {
+            //let total = self.positions.value();
+            let min_investment = Decimal::from_f32(40.0).unwrap();
+            let fraction_investment = quote_balance / min_investment;
+            let investment = if fraction_investment >= Decimal::new(2, 0) {
+                min_investment
+            } else
+            if fraction_investment >= Decimal::new(1, 0) {
+                quote_balance
+            } else {
+                Decimal::zero()
+            };
 
-        // TODO: Remove
-        let balance = Decimal::from_f32(30.0).unwrap();
-
-        if balance >= Decimal::from_f32(30.0).unwrap() {
-            log::info!("Placing entry order.");
-
-            let buy_order = self
-                .exchange
-                .limit_buy(&OpenLimitOrderRequest {
-                    market_pair: order.market.clone(),
-                    size: balance / price,
-                    price: price + incr,
-                    time_in_force: TimeInForce::FillOrKill,
-                    post_only: false,
-                })
-                .await?;
-
-            log::info!("Placing entry order was successful!");
-
-            if buy_order.status == openlimits::model::OrderStatus::Filled {
-                log::info!("Entry order was filled.");
-
-                
-                let inner = self.exchange.inner_client().unwrap();
-
-                log::info!("Placing OCO order.");
-
-                inner
-                    .oco_sell(
-                        pair,
-                        buy_order.size,
-                        take_profit,
-                        stop_loss - incr.normalize(),
-                        Some(stop_loss),
-                        Some(TimeInForce::GoodTillCancelled.into()),
-                    )
+            if investment > Decimal::zero() {
+                log::info!("Placing entry order.");
+    
+                let buy_order = self
+                    .exchange
+                    .limit_buy(&OpenLimitOrderRequest {
+                        market_pair: order.market.clone(),
+                        size: investment / price,
+                        price: price + incr,
+                        time_in_force: TimeInForce::FillOrKill,
+                        post_only: false,
+                    })
                     .await?;
 
-                log::info!("Placing OCO order was successful!");
+                log::info!("Placing entry order was successful!");
+
+                if buy_order.status == openlimits::model::OrderStatus::Filled {
+                    log::info!("Entry order was filled.");
+
+                    
+                    let inner = self.exchange.inner_client().unwrap();
+
+                    log::info!("Placing OCO order.");
+
+                    inner
+                        .oco_sell(
+                            pair,
+                            buy_order.size,
+                            take_profit,
+                            stop_loss - incr,
+                            Some(stop_loss),
+                            Some(TimeInForce::GoodTillCancelled.into()),
+                        )
+                        .await?;
+
+                    log::info!("Placing OCO order was successful!");
+                } else {
+                    log::info!("Entry order was killed.");
+                }
             } else {
-                log::info!("Entry order was killed.");
+                log::info!("Balance not sufficient.")
             }
         } else {
-            log::info!("Balance not sufficient.")
+            log::info!("Already invested in this asset.");
         }
-
+        
         Ok(())
     }
 }

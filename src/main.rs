@@ -26,7 +26,8 @@ async fn main() {
     Historical::new(true).run(&mut strategy).await;
     println!("{}", strategy);
     */
-
+    
+    
     let markets = vec![
         "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
         "LTCUSDT", "EOSUSDT", "DOTUSDT",

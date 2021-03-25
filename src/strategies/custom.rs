@@ -45,7 +45,7 @@ impl Strategy for Custom {
         self.macd.run(price);
 
         let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 1.5;
-        let worth_it = 1.0 * self.stdev.get() > price * 0.005;
+        let worth_it = 1.0 * self.stdev.get() > price * 0.01;
         let has_momentum = self.macd.get_hist() > 0.0;
 
         let action = if !is_undervalued && self.was_undervalued && worth_it && has_momentum {
@@ -53,7 +53,7 @@ impl Strategy for Custom {
                 market,
                 price,
                 take_profit: Some(price + 1.0 * self.stdev.get()),
-                stop_loss: Some(price - 2.0 * self.stdev.get()),
+                stop_loss: Some(price - 1.0 * self.stdev.get()),
                 side: Side::Buy,
             })
         } else {
