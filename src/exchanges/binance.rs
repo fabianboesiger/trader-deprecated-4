@@ -351,7 +351,7 @@ impl Binance {
             ).await;
 
             if let Some(order) = strategy.run(trade) {
-                if timestamp as u64 >= self.start + 1000 * 60 * 200 {
+                if timestamp as u64 >= self.start + 1000 * 60 * 60 * 12 {
                     if let Err(err) = self.order(order).await {
                         log::warn!("Error occured during order: {:#?}", err);
                     }
@@ -412,7 +412,7 @@ impl Binance {
                     .exchange
                     .limit_buy(&OpenLimitOrderRequest {
                         market_pair: order.market.clone(),
-                        size: investment / price,
+                        size: investment / price * Decimal::new(999, 3),
                         price: price + incr,
                         time_in_force: TimeInForce::FillOrKill,
                         post_only: false,
