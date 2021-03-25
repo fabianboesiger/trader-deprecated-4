@@ -32,7 +32,7 @@ async fn main() {
         "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
         "LTCUSDT", "EOSUSDT", "DOTUSDT",
     ];
-    Binance::new(markets, true)
+    Binance::new(markets, false)
         .await
         .run(&mut Duplicated::new(Interval::new(
             Random::new(),
