@@ -1,6 +1,9 @@
 pub mod exchanges;
 pub mod indicators;
 pub mod strategies;
+mod error;
+
+pub use error::Error;
 
 use exchanges::*;
 use strategies::*;

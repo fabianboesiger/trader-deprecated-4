@@ -47,7 +47,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_0() {
+    fn basic() {
         let mut val = Val::new(3.0, 1.0);
         val.run(0.0, 0.0);
         assert_eq!(val.get(), 0.0);

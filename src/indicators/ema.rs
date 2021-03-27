@@ -34,7 +34,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_0() {
+    fn basic() {
         let mut ema = Ema::new(3.0);
         ema.run(0.0);
         assert_eq!(ema.get(), 0.0);

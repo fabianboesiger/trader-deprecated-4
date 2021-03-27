@@ -33,7 +33,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_0() {
+    fn basic() {
         let mut lsq = Lsq::new(1.0);
         lsq.run(2.0, 4.0);
         assert_eq!(lsq.get(), 2.0);

@@ -41,7 +41,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_0() {
+    fn basic() {
         let mut macd = Macd::new(1.0, 3.0, 3.0);
         macd.run(0.0);
         assert_eq!(macd.get(), 0.0);
