@@ -56,7 +56,7 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                     timestamp/1000/60 AS timestamp
                 FROM trades
                 WHERE market = ANY($1)
-                AND timestamp > EXTRACT(EPOCH FROM (NOW() - INTERVAL '4 DAYS')) * 1000
+                AND timestamp > EXTRACT(EPOCH FROM (NOW() - INTERVAL '7 DAYS')) * 1000
                 GROUP BY market, timestamp/1000/60)
                 SELECT
                     market AS "market!",
