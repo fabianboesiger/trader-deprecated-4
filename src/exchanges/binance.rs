@@ -351,7 +351,7 @@ impl Binance {
             ).await;
 
             if let Some(order) = strategy.run(trade) {
-                if timestamp as u64 >= self.start + 1000 * 60 * 60 * 12 {
+                if timestamp as u64 >= self.start + 1000 * 60 * 60 * 8 {
                     if let Err(err) = self.order(order).await {
                         log::warn!("Error occured during order: {:#?}", err);
                     }
@@ -393,17 +393,9 @@ impl Binance {
             .unwrap_or(Decimal::zero());
 
         if base_balance * price < Decimal::new(10, 0) {
-            //let total = self.positions.value();
-            let min_investment = self.positions.value().await - Decimal::new(1, 0);
-            let fraction_investment = quote_balance / min_investment;
-            let investment = if fraction_investment >= Decimal::new(2, 0) {
-                min_investment
-            } else
-            if fraction_investment >= Decimal::new(1, 0) {
-                quote_balance
-            } else {
-                Decimal::zero()
-            };
+            let total = self.positions.value().await;
+            let min_investment = total / Decimal::new(3, 0);
+            let investment = determine_investment_amount(min_investment, quote_balance);
 
             if investment > Decimal::zero() {
                 log::info!("Placing entry order.");
@@ -452,5 +444,31 @@ impl Binance {
         }
         
         Ok(())
+    }
+}
+
+fn determine_investment_amount(minimum: Decimal, available: Decimal) -> Decimal {
+    let fraction_investment = available / minimum;
+    if fraction_investment >= Decimal::new(2, 0) {
+        minimum
+    } else
+    if fraction_investment >= Decimal::new(1, 0) {
+        available
+    } else {
+        Decimal::zero()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::Decimal;
+
+    #[test]
+    fn test_investment_amount() {
+        assert_eq!(determine_investment_amount(Decimal::new(1, 0), Decimal::new(2, 0)), Decimal::new(1, 0));
+        assert_eq!(determine_investment_amount(Decimal::new(10, 0), Decimal::new(1, 0)), Decimal::new(0, 0));
+        assert_eq!(determine_investment_amount(Decimal::new(1, 0), Decimal::new(1, 0)), Decimal::new(1, 0));
+        assert_eq!(determine_investment_amount(Decimal::new(15, 0), Decimal::new(20, 0)), Decimal::new(20, 0));
     }
 }

@@ -2,6 +2,12 @@ use super::{Order, Strategy, Trade};
 use crate::Number;
 use async_trait::async_trait;
 use std::fmt;
+use chrono::{NaiveDateTime};
+
+fn format_timestamp(timestamp: i64) -> String {
+    let date_time = NaiveDateTime::from_timestamp(timestamp / 1000, 0);
+    format!("{}", date_time.format("%c"))
+}
 
 struct OrderHistory {
     order: Order,
@@ -106,24 +112,27 @@ impl<S: Strategy> fmt::Display for Simulated<S> {
         {
             writeln!(
                 f,
-                "{}:\t {:+.2}%\t (CLOSED)\t {} min",
+                "{}:\t {:+.2}%\t (CLOSED)\t {}\t - {}",
                 order.market,
                 (sell_price / buy_price * (1.0 - 2.0 * self.fee) - 1.0) * 100.0,
-                (sell_time - buy_time) / 1000 / 60
+                format_timestamp(*buy_time),
+                format_timestamp(*sell_time),
             )?;
         }
         for OrderHistory {
             order,
             buy_price,
             sell_price,
+            buy_time,
             ..
         } in &self.open
         {
             writeln!(
                 f,
-                "{}:\t {:+.2}%\t (OPEN)",
+                "{}:\t {:+.2}%\t (OPEN)\t {}",
                 order.market,
-                (sell_price / buy_price * (1.0 - 2.0 * self.fee) - 1.0) * 100.0
+                (sell_price / buy_price * (1.0 - 2.0 * self.fee) - 1.0) * 100.0,
+                format_timestamp(*buy_time),
             )?;
         }
 
