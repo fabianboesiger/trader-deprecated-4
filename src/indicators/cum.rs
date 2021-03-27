@@ -24,7 +24,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_0() {
+    fn basic() {
         let mut cum = Cum::new();
         cum.run(10.0);
         assert_eq!(cum.get(), 10.0);

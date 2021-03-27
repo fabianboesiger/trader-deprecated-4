@@ -1,7 +1,7 @@
 use super::{Exchange, Order, Strategy, Trade};
-use crate::{Market, Number};
+use crate::{Market, Number, Error};
 use async_trait::async_trait;
-use futures::stream::{BoxStream, StreamExt};
+use futures::{StreamExt, stream::BoxStream};
 use openlimits::{
     binance::{
         model::{SymbolFilter, websocket::{BinanceWebsocketMessage, UserOrderUpdate}}, Binance as OpenLimitsBinance, BinanceCredentials, BinanceParameters,
@@ -24,6 +24,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::{sleep, timeout, Duration};
 
 type OrderId = String;
+type Symbol = String;
 
 enum State {
     Wait,
@@ -39,38 +40,47 @@ impl Default for State {
 }
 
 #[derive(Default)]
-struct Position {
-    state: State,
+struct Asset {
     price: Decimal,
     quantity: Decimal,
-    order: Option<FilteredOrder>,
 }
 
-impl Position {
+impl Asset {
     fn value(&self) -> Decimal {
         self.quantity * self.price
     }
 }
 
-#[derive(Default)]
-struct Positions(Mutex<HashMap<Market, Position>>);
+struct Wallet(Mutex<HashMap<Symbol, Asset>>);
 
-impl Positions {
-    fn enter(&self, market: Market, order: FilteredOrder) {
-        
+impl Wallet {
+    pub const QUOTE: &'static str = "USDT";
+
+    fn new() -> Self {
+        let mut map = HashMap::new();
+        map.insert(Wallet::QUOTE.to_owned(), Asset {
+            price: Decimal::one(),
+            quantity: Decimal::zero(),
+        });
+
+        Wallet(Mutex::new(map))
     }
 
-    async fn update_price(&self, market: Market, price: Decimal) {
-        self.0.lock().await.entry(market).or_default().price = price;
+    async fn update_price(&self, mut market: Market, price: Decimal) {
+        let usdt_offset = market.find(Wallet::QUOTE).unwrap();
+        self.0.lock().await.entry(market.drain(..usdt_offset).collect()).or_default().price = price;
     }
 
-    async fn update_quantity(&self, market: Market, quantity: Decimal) {
-        self.0.lock().await.entry(market).or_default().quantity = quantity;
+    async fn update_quantity(&self, asset: Symbol, quantity: Decimal) {
+        self.0.lock().await.entry(asset).or_default().quantity = quantity;
     }
 
+    async fn value<A: AsRef<str>>(&self, asset: A) -> Decimal {
+        self.0.lock().await.get(asset.as_ref()).map(|position| position.value()).unwrap_or(Decimal::zero())
+    }
 
-    async fn value(&self) -> Decimal {
-        self.0.lock().await.values().map(Position::value).sum()
+    async fn total_value(&self) -> Decimal {
+        self.0.lock().await.values().map(Asset::value).sum()
     }
     /*
     async fn update_positions(&self, exchange: &OpenLimitsBinance) -> Decimal {
@@ -80,30 +90,81 @@ impl Positions {
 }
 
 struct FilteredOrder {
+    market: Market,
     buy_price: Decimal,
     take_profit_price: Decimal,
     stop_price: Decimal,
     stop_limit_price: Decimal,
-    quantity: Decimal,
+    quote_quantity: Decimal,
+}
+
+impl FilteredOrder {
+    async fn order(self, exchange: &OpenLimitsBinance) -> OpenLimitsResult<()> {
+        if self.quote_quantity > Decimal::zero() {
+            log::info!("Placing entry order.");
+
+            let buy_order = exchange
+                .limit_buy(&OpenLimitOrderRequest {
+                    market_pair: self.market.clone(),
+                    size: self.quote_quantity / self.buy_price * Decimal::new(999, 3),
+                    price: self.buy_price,
+                    time_in_force: TimeInForce::FillOrKill,
+                    post_only: false,
+                })
+                .await?;
+
+            log::info!("Placing entry order was successful!");
+
+            if buy_order.status == openlimits::model::OrderStatus::Filled {
+                log::info!("Entry order was filled.");
+
+                let inner = exchange.inner_client().unwrap();
+                let pair = exchange.get_pair(&self.market).await?.read()?;
+
+                log::info!("Placing OCO order.");
+
+                inner
+                    .oco_sell(
+                        pair,
+                        buy_order.size,
+                        self.buy_price,
+                        self.stop_price,
+                        Some(self.stop_limit_price),
+                        Some(TimeInForce::GoodTillCancelled.into()),
+                    )
+                    .await?;
+
+                log::info!("Placing OCO order was successful!");
+            } else {
+                log::info!("Entry order was killed.");
+            }
+        } else {
+            log::info!("Balance not sufficient.")
+        }
+
+        Ok(())
+    }
 }
 
 struct Filters(Vec<SymbolFilter>);
 
 impl Filters {
-    fn apply(&self, order: Order, quantity: Decimal) -> Result<FilteredOrder, ()> {
+    fn apply(&self, order: Order, quantity: Decimal) -> Result<FilteredOrder, Error> {
         let quantity = self.quantity(quantity)?;
         let stop_limit_price = self.price(order.stop_loss.unwrap(), quantity)?;
+        let tick =  self.tick_size()?;
 
         Ok(FilteredOrder {
-            buy_price: self.price(order.price, quantity)?,
+            market: order.market,
+            buy_price: self.price(order.price, quantity)? + tick,
             take_profit_price: self.price(order.take_profit.unwrap(), quantity)?,
-            stop_price: stop_limit_price - self.tick_size()?,
+            stop_price: stop_limit_price - tick,
             stop_limit_price,
-            quantity,
+            quote_quantity: quantity,
         })
     }
 
-    fn tick_size(&self) -> Result<Decimal, ()> {
+    fn tick_size(&self) -> Result<Decimal, Error> {
         for filter in &self.0 {
             match filter {
                 SymbolFilter::PriceFilter {
@@ -116,10 +177,10 @@ impl Filters {
             }
         }
 
-        Err(())
+        Err(Error::Filter)
     }
 
-    fn quantity(&self, mut quantity: Decimal) -> Result<Decimal, ()> {
+    fn quantity(&self, mut quantity: Decimal) -> Result<Decimal, Error> {
         for filter in &self.0 {
             match filter {
                 SymbolFilter::LotSize {
@@ -128,10 +189,10 @@ impl Filters {
                     step_size,
                 } => {
                     if quantity < *min_qty {
-                        return Err(());
+                        return Err(Error::Filter);
                     }
                     if quantity > *max_qty {
-                        return Err(());
+                        return Err(Error::Filter);
                     }
                     quantity = (quantity / step_size).round_dp_with_strategy(
                         0,
@@ -144,10 +205,10 @@ impl Filters {
                     step_size,
                 } => {
                     if quantity < *min_qty {
-                        return Err(());
+                        return Err(Error::Filter);
                     }
                     if quantity > *max_qty {
-                        return Err(());
+                        return Err(Error::Filter);
                     }
                     quantity = (quantity / step_size).round_dp_with_strategy(
                         0,
@@ -161,7 +222,7 @@ impl Filters {
         Ok(quantity)
     }
 
-    fn price(&self, price: Number, quantity: Decimal) -> Result<Decimal, ()> {
+    fn price(&self, price: Number, quantity: Decimal) -> Result<Decimal, Error> {
         let mut price = Decimal::from_f32(price).unwrap();
 
         for filter in &self.0 {
@@ -172,10 +233,10 @@ impl Filters {
                     tick_size,
                 } => {
                     if price < *min_price {
-                        return Err(());
+                        return Err(Error::Filter);
                     }
                     if price > *max_price {
-                        return Err(());
+                        return Err(Error::Filter);
                     }
                     price = (price / tick_size).round() * tick_size;
                 },
@@ -183,7 +244,7 @@ impl Filters {
                     min_notional
                 } => {
                     if price * quantity < *min_notional {
-                        return Err(());
+                        return Err(Error::Filter);
                     }
                 },
                 _ => ()
@@ -196,7 +257,7 @@ impl Filters {
 
 pub struct Binance {
     sandbox: bool,
-    positions: Positions,
+    wallet: Wallet,
     markets: Vec<Market>,
     exchange: OpenLimitsBinance,
     filters: HashMap<Market, Filters>,
@@ -236,20 +297,9 @@ impl Binance {
             )
             .collect();
 
-        println!(
-            "{:?}",
-            exchange
-                .retrieve_pairs()
-                .await
-                .unwrap()
-                .into_iter()
-                .map(|pair| pair.symbol)
-                .collect::<Vec<String>>()
-        );
-
         Self {
             sandbox,
-            positions: Default::default(),
+            wallet: Wallet::new(),
             markets: markets.into_iter().map(String::from).collect(),
             exchange,
             filters,
@@ -323,9 +373,8 @@ impl Binance {
 
                                 tx.send(trade).unwrap();
                             }
-                        }
+                        },
                         WebSocketResponse::Raw(BinanceWebsocketMessage::UserOrderUpdate(UserOrderUpdate {
-                            order_status,
                             ..
                         })) => {
 
@@ -341,11 +390,11 @@ impl Binance {
         }
     }
 
-    async fn consume_trades(&self, mut rx: UnboundedReceiver<Trade>, strategy: &mut Strategy) {
+    async fn consume_trades<S: Strategy + 'static>(&self, mut rx: UnboundedReceiver<Trade>, strategy: &mut S) {
         while let Some(trade) = rx.recv().await {
             let timestamp = trade.timestamp;
 
-            self.positions.update_price(
+            self.wallet.update_price(
                 trade.market.clone(),
                 Decimal::from_f32(trade.price).unwrap(),
             ).await;
@@ -360,85 +409,27 @@ impl Binance {
         }
     }
 
-    async fn order(&self, order: Order) -> OpenLimitsResult<()> {
+    async fn order(&self, order: Order) -> Result<(), Error> {
         log::info!("Requesting order {}.", order);
+
 
         //let filters = self.filters.get(&order.market).unwrap();
         //filters.apply(order, quantity).unwrap();
 
-        let price = Decimal::from_f32(order.price).unwrap();
-        let take_profit = Decimal::from_f32(order.take_profit.unwrap()).unwrap();
-        let stop_loss = Decimal::from_f32(order.stop_loss.unwrap()).unwrap();
-
-        let pair = self.exchange.get_pair(&order.market).await?.read()?;
         let balances = self.exchange.get_account_balances(None).await?;
-        let incr = pair.quote_increment.normalize();
 
         for balance in &balances {
-            self.positions.update_quantity(format!("{}USDT", balance.asset), balance.total).await;
+            self.wallet.update_quantity(balance.asset.clone(), balance.total).await;
         }
 
-        let quote_balance = balances
-            .iter()
-            .filter(|balance| balance.asset == pair.quote)
-            .map(|balance| balance.free)
-            .next()
-            .unwrap_or(Decimal::zero());
+        let pair = self.exchange.get_pair(&order.market).await?.read()?;
 
-        let base_balance = balances
-            .iter()
-            .filter(|balance| balance.asset == pair.base)
-            .map(|balance| balance.free)
-            .next()
-            .unwrap_or(Decimal::zero());
-
-        if base_balance * price < Decimal::new(10, 0) {
-            let total = self.positions.value().await;
-            let min_investment = total / Decimal::new(3, 0);
-            let investment = determine_investment_amount(min_investment, quote_balance);
-
-            if investment > Decimal::zero() {
-                log::info!("Placing entry order.");
-    
-                let buy_order = self
-                    .exchange
-                    .limit_buy(&OpenLimitOrderRequest {
-                        market_pair: order.market.clone(),
-                        size: investment / price * Decimal::new(999, 3),
-                        price: price + incr,
-                        time_in_force: TimeInForce::FillOrKill,
-                        post_only: false,
-                    })
-                    .await?;
-
-                log::info!("Placing entry order was successful!");
-
-                if buy_order.status == openlimits::model::OrderStatus::Filled {
-                    log::info!("Entry order was filled.");
-
-                    
-                    let inner = self.exchange.inner_client().unwrap();
-
-                    log::info!("Placing OCO order.");
-
-                    inner
-                        .oco_sell(
-                            pair,
-                            buy_order.size,
-                            take_profit,
-                            stop_loss - incr,
-                            Some(stop_loss),
-                            Some(TimeInForce::GoodTillCancelled.into()),
-                        )
-                        .await?;
-
-                    log::info!("Placing OCO order was successful!");
-                } else {
-                    log::info!("Entry order was killed.");
-                }
-            } else {
-                log::info!("Balance not sufficient.")
-            }
+        if self.wallet.value(pair.base).await < Decimal::new(10, 0) {
+            let total = self.wallet.total_value().await;
+            let min_quantity = (total - Decimal::new(50, 0)) / Decimal::new(3, 0) * Decimal::new(99, 2);
+            let quantity = determine_investment_amount(min_quantity, self.wallet.value(Wallet::QUOTE).await);
+            let filtered_order =self.filters.get(&order.market).unwrap().apply(order, quantity)?;
+            filtered_order.order(&self.exchange).await?;
         } else {
             log::info!("Already invested in this asset.");
         }
@@ -465,10 +456,21 @@ mod tests {
     use rust_decimal::Decimal;
 
     #[test]
-    fn test_investment_amount() {
+    fn investment_amount() {
         assert_eq!(determine_investment_amount(Decimal::new(1, 0), Decimal::new(2, 0)), Decimal::new(1, 0));
         assert_eq!(determine_investment_amount(Decimal::new(10, 0), Decimal::new(1, 0)), Decimal::new(0, 0));
         assert_eq!(determine_investment_amount(Decimal::new(1, 0), Decimal::new(1, 0)), Decimal::new(1, 0));
         assert_eq!(determine_investment_amount(Decimal::new(15, 0), Decimal::new(20, 0)), Decimal::new(20, 0));
+    }
+
+    #[tokio::test]
+    async fn wallet() {
+        let wallet = Wallet::new();
+        assert_eq!(wallet.total_value().await, Decimal::new(0, 0));
+        wallet.update_quantity("BTC".to_owned(), Decimal::new(1, 0)).await;
+        wallet.update_price("BTCUSDT".to_owned(), Decimal::new(50000, 0)).await;
+        assert_eq!(wallet.total_value().await, Decimal::new(50000, 0));
+        wallet.update_quantity(Wallet::QUOTE.to_owned(), Decimal::new(10000, 0)).await;
+        assert_eq!(wallet.total_value().await, Decimal::new(60000, 0));
     }
 }

@@ -30,7 +30,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_0() {
+    fn basic() {
         let mut stdev = Stdev::new(3.0);
         stdev.run(0.0);
         assert_eq!(stdev.get(), 0.0);
