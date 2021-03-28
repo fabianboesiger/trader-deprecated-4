@@ -151,11 +151,37 @@ impl<S: Strategy> fmt::Display for Simulated<S> {
             / self.concurrency as f32
             * 100.0;
 
+        let wins = self
+            .closed
+            .iter()
+            .filter(
+                |OrderHistory {
+                     buy_price,
+                     sell_price,
+                     ..
+                 }| buy_price < sell_price,
+            )
+            .count();
+
+        let losses = self
+            .closed
+            .iter()
+            .filter(
+                |OrderHistory {
+                     buy_price,
+                     sell_price,
+                     ..
+                 }| buy_price >= sell_price,
+            )
+            .count();
+
         writeln!(
             f,
-            "TOTAL:  \t {:+.2}%\t ({:+.2}% per trade)",
+            "TOTAL:  \t {:+.2}%\n{:+.2}% per trade\n{} trades ({} wins / {} losses)",
             total,
             total / (self.open.len() + self.closed.len()) as f32,
+            wins + losses,
+            wins, losses
         )?;
 
         Ok(())

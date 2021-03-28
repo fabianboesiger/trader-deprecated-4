@@ -17,20 +17,16 @@ async fn main() {
     pretty_env_logger::init();
     log::info!("Starting trader.");
 
-    /* 
-    let mut strategy = Multi::new()
-        .with(Simulated::new(Hold::new(), 0.001, 11))
-        .with(Simulated::new(
-            Duplicated::new(Interval::new(Custom::new(), 1000 * 60)),
-            0.001,
-            3,
-        ));
-
-    Historical::new(true).run(&mut strategy).await;
-    println!("{}", strategy);
-    */
+    let mut strategy = Duplicated::new(Interval::new(Custom::new(), 1000 * 60));
 
     /*
+    let mut simulated = Multi::new()
+        .with(Simulated::new(Hold::new(), 0.001, 11))
+        .with(Simulated::new(strategy, 0.001, 3));
+
+    Historical::new(true).run(&mut simulated).await;
+    println!("{}", simulated);
+
     let markets = vec![
         "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
         "LTCUSDT", "EOSUSDT", "DOTUSDT",
@@ -43,12 +39,11 @@ async fn main() {
         )))
         .await;
     */
-
+    
     let markets = vec![
         "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
         "LTCUSDT", "EOSUSDT", "DOTUSDT", "THETAUSDT", "LINKUSDT"
     ];
-    let mut strategy = Duplicated::new(Interval::new(Custom::new(), 1000 * 60));
 
     Binance::new(markets, false)
         .await
