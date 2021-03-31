@@ -38,7 +38,7 @@ impl Strategy for Custom {
             ..
         }: Trade,
     ) -> Option<Order> {
-        log::trace!("Running strategy.");
+        log::info!("Running strategy.");
 
         self.stdev.run(price);
         self.val.run(quantity, price);
