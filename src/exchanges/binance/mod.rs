@@ -400,10 +400,13 @@ impl Binance {
             ).await;
 
             if let Some(order) = strategy.run(trade) {
+                log::info!("Processing order.");
                 if timestamp as u64 >= self.start + 1000 * 60 * 60 * 8 {
                     if let Err(err) = self.order(order).await {
                         log::warn!("Error occured during order: {:#?}", err);
                     }
+                } else {
+                    log::warn!("Too early to order something!");
                 }
             }
         }

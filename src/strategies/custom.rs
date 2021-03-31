@@ -19,9 +19,9 @@ impl Custom {
     pub fn new() -> Self {
         Self {
             val: Val::new(200.0, 2000.0),
-            diff: Ema::new(40.0),
+            diff: Ema::new(30.0),
             diff_stdev: Stdev::new(200.0),
-            macd: Macd::new(100.0, 200.0, 50.0),
+            macd: Macd::new(10.0, 20.0, 5.0),
             stdev: Stdev::new(200.0),
             was_undervalued: false,
         }
@@ -38,13 +38,15 @@ impl Strategy for Custom {
             ..
         }: Trade,
     ) -> Option<Order> {
+        log::trace!("Running strategy.");
+
         self.stdev.run(price);
         self.val.run(quantity, price);
         self.diff.run(price - self.val.get());
         self.diff_stdev.run(self.diff.get());
         self.macd.run(price);
 
-        let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 1.5;
+        let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 1.2;
         let worth_it = 1.0 * self.stdev.get() > price * 0.01;
         let has_momentum = self.macd.get_hist() > 0.0;
 

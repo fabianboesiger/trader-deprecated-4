@@ -26,7 +26,9 @@ async fn main() {
 
     Historical::new(true).run(&mut simulated).await;
     println!("{}", simulated);
+    */
 
+    /* 
     let markets = vec![
         "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
         "LTCUSDT", "EOSUSDT", "DOTUSDT",
@@ -39,7 +41,7 @@ async fn main() {
         )))
         .await;
     */
-    
+
     let markets = vec![
         "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
         "LTCUSDT", "EOSUSDT", "DOTUSDT", "THETAUSDT", "LINKUSDT"
