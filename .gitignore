@@ -1,6 +1,7 @@
 /target
 /.env
 /.env.live
+/.env.sandbox
 /trades.bin
 /scripts
 /strategies/custom.rs
