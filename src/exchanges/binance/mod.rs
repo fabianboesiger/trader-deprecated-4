@@ -103,10 +103,12 @@ impl FilteredOrder {
         if self.quote_quantity > Decimal::zero() {
             log::info!("Placing entry order.");
 
+            let base_quantity = self.quote_quantity / self.buy_price;
+
             let buy_order = exchange
                 .limit_buy(&OpenLimitOrderRequest {
                     market_pair: self.market.clone(),
-                    size: self.quote_quantity / self.buy_price * Decimal::new(999, 3),
+                    size: base_quantity * Decimal::new(999, 3),
                     price: self.buy_price,
                     time_in_force: TimeInForce::FillOrKill,
                     post_only: false,
@@ -122,7 +124,7 @@ impl FilteredOrder {
                 let pair = exchange.get_pair(&self.market).await?.read()?;
 
                 log::info!("Placing OCO order.");
-
+                
                 inner
                     .oco_sell(
                         pair,
@@ -183,15 +185,15 @@ impl Filters {
     fn quantity(&self, mut quantity: Decimal) -> Result<Decimal, Error> {
         for filter in &self.0 {
             match filter {
-                SymbolFilter::LotSize {
+                &SymbolFilter::LotSize {
                     min_qty,
                     max_qty,
                     step_size,
-                } => {
-                    if quantity < *min_qty {
+                } if step_size > Decimal::zero() => {
+                    if quantity < min_qty {
                         return Err(Error::Filter);
                     }
-                    if quantity > *max_qty {
+                    if quantity > max_qty {
                         return Err(Error::Filter);
                     }
                     quantity = (quantity / step_size).round_dp_with_strategy(
@@ -199,15 +201,15 @@ impl Filters {
                         RoundingStrategy::RoundDown
                     ) * step_size;
                 },
-                SymbolFilter::MarketLotSize {
+                &SymbolFilter::MarketLotSize {
                     min_qty,
                     max_qty,
                     step_size,
-                } => {
-                    if quantity < *min_qty {
+                } if step_size > Decimal::zero() => {
+                    if quantity < min_qty {
                         return Err(Error::Filter);
                     }
-                    if quantity > *max_qty {
+                    if quantity > max_qty {
                         return Err(Error::Filter);
                     }
                     quantity = (quantity / step_size).round_dp_with_strategy(
@@ -227,15 +229,15 @@ impl Filters {
 
         for filter in &self.0 {
             match filter {
-                SymbolFilter::PriceFilter {
+                &SymbolFilter::PriceFilter {
                     min_price,
                     max_price,
                     tick_size,
-                } => {
-                    if price < *min_price {
+                } if tick_size > Decimal::zero() => {
+                    if price < min_price {
                         return Err(Error::Filter);
                     }
-                    if price > *max_price {
+                    if price > max_price {
                         return Err(Error::Filter);
                     }
                     price = (price / tick_size).round() * tick_size;
@@ -392,6 +394,8 @@ impl Binance {
 
     async fn consume_trades<S: Strategy + 'static>(&self, mut rx: UnboundedReceiver<Trade>, strategy: &mut S) {
         while let Some(trade) = rx.recv().await {
+            log::trace!("Receiving trade: {:?}", trade);
+
             let timestamp = trade.timestamp;
 
             self.wallet.update_price(
@@ -401,7 +405,7 @@ impl Binance {
 
             if let Some(order) = strategy.run(trade) {
                 log::info!("Processing order.");
-                if timestamp as u64 >= self.start + 1000 * 60 * 60 * 8 {
+                if timestamp as u64 >= self.start + 1000 * 60 * 60 * 4 {
                     if let Err(err) = self.order(order).await {
                         log::warn!("Error occured during order: {:#?}", err);
                     }
@@ -442,6 +446,8 @@ impl Binance {
 }
 
 fn determine_investment_amount(minimum: Decimal, available: Decimal) -> Decimal {
+    assert!(minimum > Decimal::zero());
+
     let fraction_investment = available / minimum;
     if fraction_investment >= Decimal::new(2, 0) {
         minimum
