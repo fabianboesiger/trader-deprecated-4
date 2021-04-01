@@ -433,7 +433,7 @@ impl Binance {
 
         if self.wallet.value(pair.base).await < Decimal::new(10, 0) {
             let total = self.wallet.total_value().await;
-            let min_quantity = (total - Decimal::new(50, 0)) / Decimal::new(3, 0) * Decimal::new(99, 2);
+            let min_quantity = (total - Decimal::new(50, 0)) / Decimal::new(2, 0) * Decimal::new(99, 2);
             let quantity = determine_investment_amount(min_quantity, self.wallet.value(Wallet::QUOTE).await);
             let filtered_order =self.filters.get(&order.market).unwrap().apply(order, quantity)?;
             filtered_order.order(&self.exchange).await?;
