@@ -1,5 +1,6 @@
 use super::{Exchange, Strategy, Trade};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::postgres::PgPool;
 use std::time::SystemTime;
 use tokio::{
@@ -8,12 +9,14 @@ use tokio::{
 };
 
 pub struct Historical {
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
     cache: bool,
 }
 
 impl Historical {
-    pub fn new(cache: bool) -> Self {
-        Self { cache }
+    pub fn new(from: DateTime<Utc>, to: DateTime<Utc>, cache: bool) -> Self {
+        Self { from, to, cache }
     }
 }
 
@@ -56,8 +59,8 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                     timestamp/1000/60 AS timestamp
                 FROM trades
                 WHERE market = ANY($1)
-                AND timestamp > EXTRACT(EPOCH FROM (TIMESTAMP '2021-03-01 00:00:00')) * 1000
-                AND timestamp < EXTRACT(EPOCH FROM (TIMESTAMP '2021-04-01 00:00:00')) * 1000
+                AND timestamp > $2
+                AND timestamp <= $3
                 GROUP BY market, timestamp/1000/60)
                 SELECT
                     market AS "market!",
@@ -72,7 +75,9 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                 ]
                 .into_iter()
                 .map(String::from)
-                .collect::<Vec<String>>()
+                .collect::<Vec<String>>(),
+                self.from.timestamp_millis(),
+                self.to.timestamp_millis(),
             )
             .fetch_all(&pool)
             .await

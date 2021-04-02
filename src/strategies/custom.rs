@@ -51,7 +51,8 @@ impl Strategy for Custom {
 
         let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 1.2;
         let worth_it = 1.0 * self.stdev.get() > price * 0.01;
-        let has_momentum = self.macd.get_hist() > 0.0 && self.macd.get_hist() < 1.0 * self.hist_stdev.get();
+        let has_momentum =
+            self.macd.get_hist() > 0.0 && self.macd.get_hist() < 1.0 * self.hist_stdev.get();
 
         let action = if !is_undervalued && self.was_undervalued && worth_it && has_momentum {
             Some(Order {

@@ -1,8 +1,8 @@
 use super::{Order, Strategy, Trade};
 use crate::Number;
 use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use std::fmt;
-use chrono::{NaiveDateTime};
 
 fn format_timestamp(timestamp: i64) -> String {
     let date_time = NaiveDateTime::from_timestamp(timestamp / 1000, 0);
@@ -181,7 +181,8 @@ impl<S: Strategy> fmt::Display for Simulated<S> {
             total,
             total / (self.open.len() + self.closed.len()) as f32,
             wins + losses,
-            wins, losses
+            wins,
+            losses
         )?;
 
         Ok(())

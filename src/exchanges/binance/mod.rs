@@ -1,11 +1,14 @@
 use super::{Exchange, Order, Strategy, Trade};
-use crate::{Market, Number, Error};
+use crate::{Error, Market, Number};
 use async_trait::async_trait;
-use futures::{StreamExt, stream::BoxStream};
+use futures::{stream::BoxStream, StreamExt};
 use openlimits::{
     binance::{
-        model::{SymbolFilter, websocket::{BinanceWebsocketMessage, UserOrderUpdate}}, Binance as OpenLimitsBinance, BinanceCredentials, BinanceParameters,
-        BinanceWebsocket,
+        model::{
+            websocket::{BinanceWebsocketMessage, UserOrderUpdate},
+            SymbolFilter,
+        },
+        Binance as OpenLimitsBinance, BinanceCredentials, BinanceParameters, BinanceWebsocket,
     },
     exchange::{Exchange as OpenLimitsExchange, ExchangeAccount},
     exchange_info::ExchangeInfoRetrieval,
@@ -18,9 +21,9 @@ use openlimits::{
     shared::Result as OpenLimitsResult,
 };
 use rust_decimal::prelude::*;
-use tokio::sync::Mutex;
-use std::{collections::HashMap};
+use std::collections::HashMap;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout, Duration};
 
 type OrderId = String;
@@ -58,17 +61,36 @@ impl Wallet {
 
     fn new() -> Self {
         let mut map = HashMap::new();
-        map.insert(Wallet::QUOTE.to_owned(), Asset {
-            price: Decimal::one(),
-            quantity: Decimal::zero(),
-        });
+        map.insert(
+            Wallet::QUOTE.to_owned(),
+            Asset {
+                price: Decimal::one(),
+                quantity: Decimal::zero(),
+            },
+        );
 
         Wallet(Mutex::new(map))
     }
 
+    async fn update(&self, exchange: &OpenLimitsBinance) -> Result<(), Error> {
+        let balances = exchange.get_account_balances(None).await?;
+
+        let mut wallet = self.0.lock().await;
+        for balance in balances {
+            wallet.entry(balance.asset).or_default().quantity = balance.total;
+        }
+
+        Ok(())
+    }
+
     async fn update_price(&self, mut market: Market, price: Decimal) {
         let usdt_offset = market.find(Wallet::QUOTE).unwrap();
-        self.0.lock().await.entry(market.drain(..usdt_offset).collect()).or_default().price = price;
+        self.0
+            .lock()
+            .await
+            .entry(market.drain(..usdt_offset).collect())
+            .or_default()
+            .price = price;
     }
 
     async fn update_quantity(&self, asset: Symbol, quantity: Decimal) {
@@ -76,7 +98,12 @@ impl Wallet {
     }
 
     async fn value<A: AsRef<str>>(&self, asset: A) -> Decimal {
-        self.0.lock().await.get(asset.as_ref()).map(|position| position.value()).unwrap_or(Decimal::zero())
+        self.0
+            .lock()
+            .await
+            .get(asset.as_ref())
+            .map(|position| position.value())
+            .unwrap_or(Decimal::zero())
     }
 
     async fn total_value(&self) -> Decimal {
@@ -110,7 +137,7 @@ impl FilteredOrder {
                     market_pair: self.market.clone(),
                     size: base_quantity * Decimal::new(999, 3),
                     price: self.buy_price,
-                    time_in_force: TimeInForce::FillOrKill,
+                    time_in_force: TimeInForce::ImmediateOrCancelled,
                     post_only: false,
                 })
                 .await?;
@@ -124,12 +151,12 @@ impl FilteredOrder {
                 let pair = exchange.get_pair(&self.market).await?.read()?;
 
                 log::info!("Placing OCO order.");
-                
+
                 inner
                     .oco_sell(
                         pair,
                         buy_order.size,
-                        self.buy_price,
+                        self.take_profit_price,
                         self.stop_price,
                         Some(self.stop_limit_price),
                         Some(TimeInForce::GoodTillCancelled.into()),
@@ -154,13 +181,13 @@ impl Filters {
     fn apply(&self, order: Order, quantity: Decimal) -> Result<FilteredOrder, Error> {
         let quantity = self.quantity(quantity)?;
         let stop_limit_price = self.price(order.stop_loss.unwrap(), quantity)?;
-        let tick =  self.tick_size()?;
+        let tick = self.tick_size()?;
 
         Ok(FilteredOrder {
             market: order.market,
-            buy_price: self.price(order.price, quantity)? + tick,
+            buy_price: self.price(order.price, quantity)? + Decimal::new(2, 0) * tick,
             take_profit_price: self.price(order.take_profit.unwrap(), quantity)?,
-            stop_price: stop_limit_price - tick,
+            stop_price: stop_limit_price - Decimal::new(2, 0) * tick,
             stop_limit_price,
             quote_quantity: quantity,
         })
@@ -169,13 +196,10 @@ impl Filters {
     fn tick_size(&self) -> Result<Decimal, Error> {
         for filter in &self.0 {
             match filter {
-                SymbolFilter::PriceFilter {
-                    tick_size,
-                    ..
-                } => {
+                SymbolFilter::PriceFilter { tick_size, .. } => {
                     return Ok(*tick_size);
-                },
-                _ => ()
+                }
+                _ => (),
             }
         }
 
@@ -196,11 +220,10 @@ impl Filters {
                     if quantity > max_qty {
                         return Err(Error::Filter);
                     }
-                    quantity = (quantity / step_size).round_dp_with_strategy(
-                        0,
-                        RoundingStrategy::RoundDown
-                    ) * step_size;
-                },
+                    quantity = (quantity / step_size)
+                        .round_dp_with_strategy(0, RoundingStrategy::RoundDown)
+                        * step_size;
+                }
                 &SymbolFilter::MarketLotSize {
                     min_qty,
                     max_qty,
@@ -212,12 +235,11 @@ impl Filters {
                     if quantity > max_qty {
                         return Err(Error::Filter);
                     }
-                    quantity = (quantity / step_size).round_dp_with_strategy(
-                        0,
-                        RoundingStrategy::RoundDown
-                    ) * step_size;
-                },
-                _ => ()
+                    quantity = (quantity / step_size)
+                        .round_dp_with_strategy(0, RoundingStrategy::RoundDown)
+                        * step_size;
+                }
+                _ => (),
             }
         }
 
@@ -241,15 +263,13 @@ impl Filters {
                         return Err(Error::Filter);
                     }
                     price = (price / tick_size).round() * tick_size;
-                },
-                SymbolFilter::MinNotional {
-                    min_notional
-                } => {
+                }
+                SymbolFilter::MinNotional { min_notional } => {
                     if price * quantity < *min_notional {
                         return Err(Error::Filter);
                     }
-                },
-                _ => ()
+                }
+                _ => (),
             }
         }
 
@@ -283,7 +303,6 @@ impl Binance {
 
         log::info!("Getting exchange info.");
 
-
         let inner = exchange.inner_client().unwrap();
         let start = inner.get_server_time().await.unwrap().server_time;
         let info = inner.get_exchange_info().await.unwrap();
@@ -293,9 +312,7 @@ impl Binance {
             .map(
                 |openlimits::binance::model::Symbol {
                      symbol, filters, ..
-                 }| {
-                    (symbol, Filters(filters))
-                 },
+                 }| { (symbol, Filters(filters)) },
             )
             .collect();
 
@@ -352,8 +369,11 @@ impl Binance {
         loop {
             if let Ok(mut stream) = self.connect_websocket().await {
                 log::info!("Trade stream started!");
-                while let Ok(Some(Ok(message))) =
-                    timeout(Duration::from_secs(if self.sandbox { 500 } else { 5 }), stream.next()).await
+                while let Ok(Some(Ok(message))) = timeout(
+                    Duration::from_secs(if self.sandbox { 500 } else { 5 }),
+                    stream.next(),
+                )
+                .await
                 {
                     match message {
                         WebSocketResponse::Generic(OpenLimitsWebSocketMessage::Trades(trades)) => {
@@ -375,12 +395,10 @@ impl Binance {
 
                                 tx.send(trade).unwrap();
                             }
-                        },
-                        WebSocketResponse::Raw(BinanceWebsocketMessage::UserOrderUpdate(UserOrderUpdate {
-                            ..
-                        })) => {
-
                         }
+                        WebSocketResponse::Raw(BinanceWebsocketMessage::UserOrderUpdate(
+                            UserOrderUpdate { .. },
+                        )) => {}
                         _ => (),
                     }
                 }
@@ -392,26 +410,32 @@ impl Binance {
         }
     }
 
-    async fn consume_trades<S: Strategy + 'static>(&self, mut rx: UnboundedReceiver<Trade>, strategy: &mut S) {
+    async fn consume_trades<S: Strategy + 'static>(
+        &self,
+        mut rx: UnboundedReceiver<Trade>,
+        strategy: &mut S,
+    ) {
         while let Some(trade) = rx.recv().await {
             log::trace!("Receiving trade: {:?}", trade);
 
             let timestamp = trade.timestamp;
 
-            self.wallet.update_price(
-                trade.market.clone(),
-                Decimal::from_f32(trade.price).unwrap(),
-            ).await;
+            self.wallet
+                .update_price(
+                    trade.market.clone(),
+                    Decimal::from_f32(trade.price).unwrap(),
+                )
+                .await;
 
             if let Some(order) = strategy.run(trade) {
                 log::info!("Processing order.");
-                if timestamp as u64 >= self.start + 1000 * 60 * 60 * 4 {
-                    if let Err(err) = self.order(order).await {
-                        log::warn!("Error occured during order: {:#?}", err);
-                    }
-                } else {
-                    log::warn!("Too early to order something!");
+                //if timestamp as u64 >= self.start + 1000 * 60 * 60 * 4 {
+                if let Err(err) = self.order(order).await {
+                    log::warn!("Error occured during order: {:#?}", err);
                 }
+                //} else {
+                //    log::warn!("Too early to order something!");
+                //}
             }
         }
     }
@@ -419,28 +443,28 @@ impl Binance {
     async fn order(&self, order: Order) -> Result<(), Error> {
         log::info!("Requesting order {}.", order);
 
-
         //let filters = self.filters.get(&order.market).unwrap();
         //filters.apply(order, quantity).unwrap();
 
-        let balances = self.exchange.get_account_balances(None).await?;
-
-        for balance in &balances {
-            self.wallet.update_quantity(balance.asset.clone(), balance.total).await;
-        }
-
+        self.wallet.update(&self.exchange).await?;
         let pair = self.exchange.get_pair(&order.market).await?.read()?;
 
         if self.wallet.value(pair.base).await < Decimal::new(10, 0) {
             let total = self.wallet.total_value().await;
-            let min_quantity = (total - Decimal::new(50, 0)) / Decimal::new(2, 0) * Decimal::new(99, 2);
-            let quantity = determine_investment_amount(min_quantity, self.wallet.value(Wallet::QUOTE).await);
-            let filtered_order =self.filters.get(&order.market).unwrap().apply(order, quantity)?;
+            let min_quantity =
+                (total - Decimal::new(50, 0)) / Decimal::new(2, 0) * Decimal::new(99, 2);
+            let quantity =
+                determine_investment_amount(min_quantity, self.wallet.value(Wallet::QUOTE).await);
+            let filtered_order = self
+                .filters
+                .get(&order.market)
+                .unwrap()
+                .apply(order, quantity)?;
             filtered_order.order(&self.exchange).await?;
         } else {
             log::info!("Already invested in this asset.");
         }
-        
+
         Ok(())
     }
 }
@@ -451,8 +475,7 @@ fn determine_investment_amount(minimum: Decimal, available: Decimal) -> Decimal 
     let fraction_investment = available / minimum;
     if fraction_investment >= Decimal::new(2, 0) {
         minimum
-    } else
-    if fraction_investment >= Decimal::new(1, 0) {
+    } else if fraction_investment >= Decimal::new(1, 0) {
         available
     } else {
         Decimal::zero()
@@ -466,20 +489,38 @@ mod tests {
 
     #[test]
     fn investment_amount() {
-        assert_eq!(determine_investment_amount(Decimal::new(1, 0), Decimal::new(2, 0)), Decimal::new(1, 0));
-        assert_eq!(determine_investment_amount(Decimal::new(10, 0), Decimal::new(1, 0)), Decimal::new(0, 0));
-        assert_eq!(determine_investment_amount(Decimal::new(1, 0), Decimal::new(1, 0)), Decimal::new(1, 0));
-        assert_eq!(determine_investment_amount(Decimal::new(15, 0), Decimal::new(20, 0)), Decimal::new(20, 0));
+        assert_eq!(
+            determine_investment_amount(Decimal::new(1, 0), Decimal::new(2, 0)),
+            Decimal::new(1, 0)
+        );
+        assert_eq!(
+            determine_investment_amount(Decimal::new(10, 0), Decimal::new(1, 0)),
+            Decimal::new(0, 0)
+        );
+        assert_eq!(
+            determine_investment_amount(Decimal::new(1, 0), Decimal::new(1, 0)),
+            Decimal::new(1, 0)
+        );
+        assert_eq!(
+            determine_investment_amount(Decimal::new(15, 0), Decimal::new(20, 0)),
+            Decimal::new(20, 0)
+        );
     }
 
     #[tokio::test]
     async fn wallet() {
         let wallet = Wallet::new();
         assert_eq!(wallet.total_value().await, Decimal::new(0, 0));
-        wallet.update_quantity("BTC".to_owned(), Decimal::new(1, 0)).await;
-        wallet.update_price("BTCUSDT".to_owned(), Decimal::new(50000, 0)).await;
+        wallet
+            .update_quantity("BTC".to_owned(), Decimal::new(1, 0))
+            .await;
+        wallet
+            .update_price("BTCUSDT".to_owned(), Decimal::new(50000, 0))
+            .await;
         assert_eq!(wallet.total_value().await, Decimal::new(50000, 0));
-        wallet.update_quantity(Wallet::QUOTE.to_owned(), Decimal::new(10000, 0)).await;
+        wallet
+            .update_quantity(Wallet::QUOTE.to_owned(), Decimal::new(10000, 0))
+            .await;
         assert_eq!(wallet.total_value().await, Decimal::new(60000, 0));
     }
 }
