@@ -13,7 +13,9 @@ pub struct Custom {
     hist_stdev: Stdev,
     macd: Macd,
     stdev: Stdev,
+    bb: Bb,
     was_undervalued: bool,
+    bought_at: i64,
 }
 
 impl Custom {
@@ -25,7 +27,9 @@ impl Custom {
             hist_stdev: Stdev::new(200.0),
             macd: Macd::new(10.0, 20.0, 5.0),
             stdev: Stdev::new(200.0),
+            bb: Bb::new(20.0, 1.0),
             was_undervalued: false,
+            bought_at: 0,
         }
     }
 }
@@ -37,7 +41,7 @@ impl Strategy for Custom {
             market,
             quantity,
             price,
-            ..
+            timestamp,
         }: Trade,
     ) -> Option<Order> {
         log::trace!("Running strategy.");
@@ -48,13 +52,21 @@ impl Strategy for Custom {
         self.diff_stdev.run(self.diff.get());
         self.macd.run(price);
         self.hist_stdev.run(self.macd.get_hist());
+        self.bb.run(price);
 
         let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 1.2;
         let worth_it = 1.0 * self.stdev.get() > price * 0.01;
         let has_momentum =
             self.macd.get_hist() > 0.0 && self.macd.get_hist() < 1.0 * self.hist_stdev.get();
 
-        let action = if !is_undervalued && self.was_undervalued && worth_it && has_momentum {
+        let action = if
+            !is_undervalued &&
+            self.was_undervalued &&
+            worth_it &&
+            has_momentum && 
+            self.bought_at + 1000 * 60 * 60 * 24 < timestamp
+        {
+            self.bought_at = timestamp;
             Some(Order {
                 market,
                 price,

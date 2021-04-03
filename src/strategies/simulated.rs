@@ -177,12 +177,11 @@ impl<S: Strategy> fmt::Display for Simulated<S> {
 
         writeln!(
             f,
-            "TOTAL:  \t {:+.2}%\n{:+.2}% per trade\n{} trades ({} wins / {} losses)",
+            "TOTAL:  \t {:+.2}%\n{:+.2}% per trade\n{} trades ({:.2}% profitable)",
             total,
             total / (self.open.len() + self.closed.len()) as f32,
             wins + losses,
-            wins,
-            losses
+            wins as f32 / (wins + losses) as f32 * 100.0,
         )?;
 
         Ok(())
