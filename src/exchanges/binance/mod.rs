@@ -17,7 +17,7 @@ use openlimits::{
         websocket::{OpenLimitsWebSocketMessage, Subscription, WebSocketResponse},
         Side,
     },
-    model::{Balance, OpenLimitOrderRequest, TimeInForce},
+    model::{OpenMarketOrderRequest, TimeInForce},
     shared::Result as OpenLimitsResult,
 };
 use rust_decimal::prelude::*;
@@ -26,21 +26,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout, Duration};
 
-type OrderId = String;
 type Symbol = String;
-
-enum State {
-    Wait,
-    Buy(OrderId),
-    Hold,
-    Sell,
-}
-
-impl Default for State {
-    fn default() -> State {
-        State::Wait
-    }
-}
 
 #[derive(Default)]
 struct Asset {
@@ -57,12 +43,13 @@ impl Asset {
 struct Wallet(Mutex<HashMap<Symbol, Asset>>);
 
 impl Wallet {
-    pub const QUOTE: &'static str = "USDT";
+    pub const QUOTE_ASSET: &'static str = "USDT";
+    pub const FEE_ASSET: &'static str = "BNB";
 
     fn new() -> Self {
         let mut map = HashMap::new();
         map.insert(
-            Wallet::QUOTE.to_owned(),
+            Wallet::QUOTE_ASSET.to_owned(),
             Asset {
                 price: Decimal::one(),
                 quantity: Decimal::zero(),
@@ -84,7 +71,7 @@ impl Wallet {
     }
 
     async fn update_price(&self, mut market: Market, price: Decimal) {
-        let usdt_offset = market.find(Wallet::QUOTE).unwrap();
+        let usdt_offset = market.find(Wallet::QUOTE_ASSET).unwrap();
         self.0
             .lock()
             .await
@@ -133,12 +120,12 @@ impl FilteredOrder {
             let base_quantity = self.quote_quantity / self.buy_price;
 
             let buy_order = exchange
-                .limit_buy(&OpenLimitOrderRequest {
+                .market_buy(&OpenMarketOrderRequest {
                     market_pair: self.market.clone(),
                     size: base_quantity * Decimal::new(999, 3),
-                    price: self.buy_price,
-                    time_in_force: TimeInForce::ImmediateOrCancelled,
-                    post_only: false,
+                    //price: self.buy_price,
+                    //time_in_force: TimeInForce::ImmediateOrCancelled,
+                    //post_only: false,
                 })
                 .await?;
 
@@ -418,7 +405,7 @@ impl Binance {
         while let Some(trade) = rx.recv().await {
             log::trace!("Receiving trade: {:?}", trade);
 
-            let timestamp = trade.timestamp;
+            //let timestamp = trade.timestamp;
 
             self.wallet
                 .update_price(
@@ -449,12 +436,13 @@ impl Binance {
         self.wallet.update(&self.exchange).await?;
         let pair = self.exchange.get_pair(&order.market).await?.read()?;
 
-        if self.wallet.value(pair.base).await < Decimal::new(10, 0) {
+        let base_quantity = self.wallet.value(pair.base.clone()).await;
+        if (pair.base == Wallet::FEE_ASSET && base_quantity < Decimal::new(60, 0)) || base_quantity < Decimal::new(10, 0) {
             let total = self.wallet.total_value().await;
             let min_quantity =
                 (total - Decimal::new(50, 0)) / Decimal::new(2, 0) * Decimal::new(99, 2);
             let quantity =
-                determine_investment_amount(min_quantity, self.wallet.value(Wallet::QUOTE).await);
+                determine_investment_amount(min_quantity, self.wallet.value(Wallet::QUOTE_ASSET).await);
             let filtered_order = self
                 .filters
                 .get(&order.market)
@@ -519,7 +507,7 @@ mod tests {
             .await;
         assert_eq!(wallet.total_value().await, Decimal::new(50000, 0));
         wallet
-            .update_quantity(Wallet::QUOTE.to_owned(), Decimal::new(10000, 0))
+            .update_quantity(Wallet::QUOTE_ASSET.to_owned(), Decimal::new(10000, 0))
             .await;
         assert_eq!(wallet.total_value().await, Decimal::new(60000, 0));
     }

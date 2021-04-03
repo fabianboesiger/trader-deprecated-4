@@ -8,7 +8,7 @@ pub use error::Error;
 use exchanges::*;
 use strategies::*;
 
-use chrono::{Duration, Utc};
+use chrono::{Duration, Utc, TimeZone};
 
 type Number = f32;
 type Market = String;
@@ -26,31 +26,23 @@ async fn main() {
         .with(Simulated::new(Hold::new(), 0.001, 11))
         .with(Simulated::new(strategy, 0.001, 2));
 
-    Historical::new(Utc::now() - Duration::days(1), Utc::now(), false).run(&mut simulated).await;
+    Historical::new(
+        Utc.ymd(2021, 3, 1).and_hms(0, 0, 0), 
+        Utc::now(), 
+        true
+    ).run(&mut simulated).await;
     println!("{}", simulated);
     */
 
-    /*
-    let markets = vec![
-        "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
-        "LTCUSDT", "EOSUSDT", "DOTUSDT",
-    ];
-    Binance::new(markets, false)
-        .await
-        .run(&mut Duplicated::new(Interval::new(
-            Random::new(),
-            1000 * 60,
-        )))
-        .await;
-    */
-
+    
     let markets = vec![
         "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
         "LTCUSDT", "EOSUSDT", "DOTUSDT", "THETAUSDT", "LINKUSDT"
     ];
-    
+
     Historical::new(Utc::now() - Duration::days(1), Utc::now(), false)
         .run(&mut strategy)
         .await;
     Binance::new(markets, false).await.run(&mut strategy).await;
+    
 }
