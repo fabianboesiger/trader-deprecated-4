@@ -70,8 +70,8 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                 FROM grouped
                 ORDER BY timestamp ASC"#,
                 &vec![
-                    "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT",
-                    "XRPUSDT", "LTCUSDT", "EOSUSDT", "DOTUSDT"
+                    "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
+                    "LTCUSDT", "EOSUSDT", "DOTUSDT", "THETAUSDT", "LINKUSDT"
                 ]
                 .into_iter()
                 .map(String::from)

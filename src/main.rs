@@ -21,9 +21,10 @@ async fn main() {
 
     let mut strategy = Duplicated::new(Interval::new(Custom::new(), 1000 * 60));
 
+    
     /*
     let mut simulated = Multi::new()
-        .with(Simulated::new(Hold::new(), 0.001, 11))
+        .with(Simulated::new(Hold::new(), 0.001, 13))
         .with(Simulated::new(strategy, 0.001, 2));
 
     Historical::new(
@@ -33,7 +34,7 @@ async fn main() {
     ).run(&mut simulated).await;
     println!("{}", simulated);
     */
-
+    
     
     let markets = vec![
         "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
@@ -44,5 +45,6 @@ async fn main() {
         .run(&mut strategy)
         .await;
     Binance::new(markets, false).await.run(&mut strategy).await;
+
     
 }
