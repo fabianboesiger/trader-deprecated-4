@@ -13,7 +13,6 @@ pub struct Custom {
     hist_stdev: Stdev,
     macd: Macd,
     stdev: Stdev,
-    bb: Bb,
     was_undervalued: bool,
     bought_at: i64,
 }
@@ -27,7 +26,6 @@ impl Custom {
             hist_stdev: Stdev::new(200.0),
             macd: Macd::new(10.0, 20.0, 5.0),
             stdev: Stdev::new(200.0),
-            bb: Bb::new(20.0, 1.0),
             was_undervalued: false,
             bought_at: 0,
         }
@@ -52,7 +50,6 @@ impl Strategy for Custom {
         self.diff_stdev.run(self.diff.get());
         self.macd.run(price);
         self.hist_stdev.run(self.macd.get_hist());
-        self.bb.run(price);
 
         let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 1.2;
         let worth_it = 1.0 * self.stdev.get() > price * 0.01;
