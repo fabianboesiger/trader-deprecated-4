@@ -1448,7 +1448,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "openlimits"
 version = "0.1.10-alpha.0"
-source = "git+https://github.com/fabianboesiger/openlimits#9c81e01c3768cf14cb724257fc796d179c2627d2"
+source = "git+https://github.com/fabianboesiger/openlimits#ffd9004f466fff8cfbe50a7f0b0e55c0065516ad"
 dependencies = [
  "async-trait",
  "base64",

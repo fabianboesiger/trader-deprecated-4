@@ -420,7 +420,8 @@ impl Binance {
                         let mut interval = tokio::time::interval(Duration::from_secs(60 * 30));
                         loop {
                             interval.tick().await;
-                            if let Err(_) = self.exchange.inner_client().unwrap().user_stream_keep_alive(&listen_key).await {
+                            if let Err(err) = self.exchange.inner_client().unwrap().user_stream_keep_alive(&listen_key).await {
+                                println!("{}\n {:#?}", listen_key, err);
                                 break;
                             }
                         }
