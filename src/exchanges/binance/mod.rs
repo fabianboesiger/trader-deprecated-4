@@ -5,7 +5,7 @@ use futures::{stream::BoxStream, StreamExt};
 use openlimits::{
     binance::{
         model::{
-            websocket::{BinanceWebsocketMessage, UserOrderUpdate},
+            websocket::{BinanceWebsocketMessage, UserOrderUpdate, BinanceSubscription},
             SymbolFilter,
         },
         Binance as OpenLimitsBinance, BinanceCredentials, BinanceParameters, BinanceWebsocket,
@@ -14,19 +14,59 @@ use openlimits::{
     exchange_info::ExchangeInfoRetrieval,
     exchange_ws::{ExchangeWs, OpenLimitsWs},
     model::{
-        websocket::{OpenLimitsWebSocketMessage, Subscription, WebSocketResponse},
+        websocket::{OpenLimitsWebSocketMessage, WebSocketResponse},
         Side,
     },
-    model::{OpenMarketOrderRequest, TimeInForce},
+    model::{OpenMarketOrderRequest, TimeInForce, OrderStatus},
     shared::Result as OpenLimitsResult,
 };
 use rust_decimal::prelude::*;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::atomic::{AtomicU32, AtomicU64, Ordering}};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout, Duration};
 
 type Symbol = String;
+
+struct Position {
+    take_profit_id: u64,
+    stop_loss_id: u64,
+}
+
+struct Positions(Mutex<Vec<Position>>);
+
+impl Positions {
+    fn new() -> Self {
+        Positions(Mutex::new(Vec::new()))
+    }
+
+    async fn terminate(&self, trade_id: u64) -> Option<bool> {
+        let mut positions = self.0.lock().await;
+
+        let mut profitalbe = false;
+        let mut index = None;
+        for (i, position) in positions.iter().enumerate() {
+            if position.take_profit_id == trade_id {
+                profitalbe = true;
+                index = Some(i);
+            }
+            if position.stop_loss_id == trade_id {
+                index = Some(i);
+            }
+        }
+
+        if let Some(index) = index {
+            positions.remove(index);
+            Some(profitalbe)
+        } else {
+            None
+        }
+    }
+
+    async fn open(&self, position: Position) {
+        self.0.lock().await.push(position);
+    }
+}
 
 #[derive(Default)]
 struct Asset {
@@ -79,7 +119,7 @@ impl Wallet {
             .or_default()
             .price = price;
     }
-
+    
     async fn update_quantity(&self, asset: Symbol, quantity: Decimal) {
         self.0.lock().await.entry(asset).or_default().quantity = quantity;
     }
@@ -113,8 +153,8 @@ struct FilteredOrder {
 }
 
 impl FilteredOrder {
-    async fn order(self, exchange: &OpenLimitsBinance) -> OpenLimitsResult<()> {
-        if self.quote_quantity > Decimal::zero() {
+    async fn order(self, exchange: &OpenLimitsBinance) -> OpenLimitsResult<Option<Position>> {
+        Ok(if self.quote_quantity > Decimal::zero() {
             log::info!("Placing entry order.");
 
             let base_quantity = self.quote_quantity / self.buy_price;
@@ -131,7 +171,7 @@ impl FilteredOrder {
 
             log::info!("Placing entry order was successful!");
 
-            if buy_order.status == openlimits::model::OrderStatus::Filled {
+            if buy_order.status == OrderStatus::Filled {
                 log::info!("Entry order was filled.");
 
                 let inner = exchange.inner_client().unwrap();
@@ -139,7 +179,7 @@ impl FilteredOrder {
 
                 log::info!("Placing OCO order.");
 
-                inner
+                let result = inner
                     .oco_sell(
                         pair,
                         buy_order.size,
@@ -150,15 +190,23 @@ impl FilteredOrder {
                     )
                     .await?;
 
+                let take_profit_id = result.order_reports.iter().filter(|order| order.type_name == "LIMIT_MAKER").map(|order| order.order_id).next().unwrap();
+                let stop_loss_id = result.order_reports.iter().filter(|order| order.type_name == "STOP_LOSS_LIMIT").map(|order| order.order_id).next().unwrap();
+
                 log::info!("Placing OCO order was successful!");
+
+                Some(Position {
+                    take_profit_id,
+                    stop_loss_id,
+                })
             } else {
                 log::info!("Entry order was killed.");
+                None
             }
         } else {
-            log::info!("Balance not sufficient.")
-        }
-
-        Ok(())
+            log::info!("Balance not sufficient.");
+            None
+        })
     }
 }
 
@@ -267,9 +315,12 @@ impl Filters {
 pub struct Binance {
     sandbox: bool,
     wallet: Wallet,
+    positions: Positions,
     markets: Vec<Market>,
     exchange: OpenLimitsBinance,
     filters: HashMap<Market, Filters>,
+    consecutive_losses: AtomicU32,
+    wait_until: AtomicU64,
     start: u64,
 }
 
@@ -306,9 +357,12 @@ impl Binance {
         Self {
             sandbox,
             wallet: Wallet::new(),
+            positions: Positions::new(),
             markets: markets.into_iter().map(String::from).collect(),
             exchange,
             filters,
+            consecutive_losses: AtomicU32::new(0),
+            wait_until: AtomicU64::new(0),
             start,
         }
     }
@@ -327,16 +381,21 @@ impl Binance {
     async fn connect_websocket(
         &self,
     ) -> OpenLimitsResult<
-        BoxStream<
+        (String, BoxStream<
             'static,
             OpenLimitsResult<WebSocketResponse<<BinanceWebsocket as ExchangeWs>::Response>>,
-        >,
+        >),
     > {
-        let subscriptions = self
+        let mut subscriptions = self
             .markets
             .iter()
-            .map(|symbol| Subscription::Trades(symbol.to_lowercase().to_string()))
-            .collect::<Vec<Subscription>>();
+            .map(|symbol| BinanceSubscription::Trade(symbol.to_lowercase().to_string()))
+            .collect::<Vec<BinanceSubscription>>();
+
+        let inner = self.exchange.inner_client().unwrap();
+        let user_data = inner.user_stream_start().await?;
+
+        subscriptions.push(BinanceSubscription::UserData(user_data.listen_key.clone()));
 
         let stream = OpenLimitsWs {
             websocket: BinanceWebsocket::new(if self.sandbox {
@@ -349,47 +408,81 @@ impl Binance {
         .create_stream(&subscriptions)
         .await?;
 
-        Ok(stream)
+        Ok((user_data.listen_key, stream))
     }
 
     async fn produce_trades(&self, tx: UnboundedSender<Trade>) {
         loop {
-            if let Ok(mut stream) = self.connect_websocket().await {
-                log::info!("Trade stream started!");
-                while let Ok(Some(Ok(message))) = timeout(
-                    Duration::from_secs(if self.sandbox { 500 } else { 5 }),
-                    stream.next(),
-                )
-                .await
-                {
-                    match message {
-                        WebSocketResponse::Generic(OpenLimitsWebSocketMessage::Trades(trades)) => {
-                            for trade in trades {
-                                let market = trade.market_pair;
-                                let quantity = match trade.side {
-                                    Side::Buy => -trade.qty,
-                                    Side::Sell => trade.qty,
-                                };
-                                let price = trade.price;
-                                let timestamp = trade.created_at as i64;
+            if let Ok((listen_key, mut stream)) = self.connect_websocket().await {
 
-                                let trade = Trade {
-                                    market,
-                                    quantity: quantity.to_f32().unwrap(),
-                                    price: price.to_f32().unwrap(),
-                                    timestamp,
-                                };
-
-                                tx.send(trade).unwrap();
+                tokio::select! {
+                    _ = async {
+                        let mut interval = tokio::time::interval(Duration::from_secs(60 * 30));
+                        loop {
+                            interval.tick().await;
+                            if let Err(_) = self.exchange.inner_client().unwrap().user_stream_keep_alive(&listen_key).await {
+                                break;
                             }
                         }
-                        WebSocketResponse::Raw(BinanceWebsocketMessage::UserOrderUpdate(
-                            UserOrderUpdate { .. },
-                        )) => {}
-                        _ => (),
-                    }
+                        log::warn!("User data stream timeout, trying to reconnect.");
+                    } => {}
+                    _ = async {
+                        log::info!("Trade stream started!");
+                        while let Ok(Some(Ok(message))) = timeout(
+                            Duration::from_secs(if self.sandbox { 500 } else { 5 }),
+                            stream.next(),
+                        )
+                        .await
+                        {
+                            match message {
+                                WebSocketResponse::Generic(OpenLimitsWebSocketMessage::Trades(trades)) => {
+                                    for trade in trades {
+                                        let market = trade.market_pair;
+                                        let quantity = match trade.side {
+                                            Side::Buy => -trade.qty,
+                                            Side::Sell => trade.qty,
+                                        };
+                                        let price = trade.price;
+                                        let timestamp = trade.created_at as i64;
+
+                                        let trade = Trade {
+                                            market,
+                                            quantity: quantity.to_f32().unwrap(),
+                                            price: price.to_f32().unwrap(),
+                                            timestamp,
+                                        };
+
+                                        tx.send(trade).unwrap();
+                                    }
+                                }
+                                WebSocketResponse::Raw(BinanceWebsocketMessage::UserOrderUpdate(
+                                    UserOrderUpdate { trade_id, order_status, event_time, .. },
+                                )) => {
+                                    if order_status == openlimits::binance::model::OrderStatus::Filled || order_status == openlimits::binance::model::OrderStatus::PartiallyFilled {
+                                        if let Some(profitable) = self.positions.terminate(trade_id as u64).await {
+                                            if profitable {
+                                                log::info!("Last trade was profitable.");
+                                                self.consecutive_losses.store(0, Ordering::Relaxed);
+                                            } else {
+                                                log::info!("Last trade was unprofitable.");
+                                                self.consecutive_losses.fetch_add(1, Ordering::Relaxed);
+                                                if self.consecutive_losses.load(Ordering::Relaxed) >= 2 {
+                                                    self.wait_until.store(event_time + 1000 * 60 * 60 * 12, Ordering::Relaxed);
+                                                    self.consecutive_losses.store(0, Ordering::Relaxed);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => (),
+                            }
+                        }
+                        log::warn!("Message timeout, trying to reconnect.");
+                    } => {}
                 }
-                log::warn!("Message timeout, trying to reconnect.");
+                
+
+
             } else {
                 log::warn!("Unable to reach websocket, trying to reconnect.");
                 sleep(Duration::from_secs(5)).await;
@@ -405,7 +498,7 @@ impl Binance {
         while let Some(trade) = rx.recv().await {
             log::trace!("Receiving trade: {:?}", trade);
 
-            //let timestamp = trade.timestamp;
+            let timestamp = trade.timestamp;
 
             self.wallet
                 .update_price(
@@ -417,7 +510,7 @@ impl Binance {
             if let Some(order) = strategy.run(trade) {
                 log::info!("Processing order.");
                 //if timestamp as u64 >= self.start + 1000 * 60 * 60 * 4 {
-                if let Err(err) = self.order(order).await {
+                if let Err(err) = self.order(order, timestamp as u64).await {
                     log::warn!("Error occured during order: {:#?}", err);
                 }
                 //} else {
@@ -427,7 +520,7 @@ impl Binance {
         }
     }
 
-    async fn order(&self, order: Order) -> Result<(), Error> {
+    async fn order(&self, order: Order, timestamp: u64) -> Result<(), Error> {
         log::info!("Requesting order {}.", order);
 
         //let filters = self.filters.get(&order.market).unwrap();
@@ -438,17 +531,24 @@ impl Binance {
 
         let base_quantity = self.wallet.value(pair.base.clone()).await;
         if (pair.base == Wallet::FEE_ASSET && base_quantity < Decimal::new(60, 0)) || base_quantity < Decimal::new(10, 0) {
-            let total = self.wallet.total_value().await;
-            let min_quantity =
-                (total - Decimal::new(50, 0)) / Decimal::new(2, 0) * Decimal::new(99, 2);
-            let quantity =
-                determine_investment_amount(min_quantity, self.wallet.value(Wallet::QUOTE_ASSET).await);
-            let filtered_order = self
-                .filters
-                .get(&order.market)
-                .unwrap()
-                .apply(order, quantity)?;
-            filtered_order.order(&self.exchange).await?;
+            if self.wait_until.load(Ordering::Relaxed) < timestamp {
+                let total = self.wallet.total_value().await;
+                let min_quantity =
+                    (total - Decimal::new(50, 0)) / Decimal::new(2, 0) * Decimal::new(99, 2);
+                let quantity =
+                    determine_investment_amount(min_quantity, self.wallet.value(Wallet::QUOTE_ASSET).await);
+                let filtered_order = self
+                    .filters
+                    .get(&order.market)
+                    .unwrap()
+                    .apply(order, quantity)?;
+
+                if let Some(position) = filtered_order.order(&self.exchange).await? {
+                    self.positions.open(position).await;
+                }
+            } else {
+                log::warn!("Backoff still in place.")
+            }
         } else {
             log::info!("Already invested in this asset.");
         }

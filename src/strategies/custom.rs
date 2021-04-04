@@ -61,7 +61,7 @@ impl Strategy for Custom {
             self.was_undervalued &&
             worth_it &&
             has_momentum && 
-            self.bought_at + 1000 * 60 * 60 * 24 < timestamp
+            self.bought_at + 1000 * 60 * 60 * 12 < timestamp
         {
             self.bought_at = timestamp;
             Some(Order {
