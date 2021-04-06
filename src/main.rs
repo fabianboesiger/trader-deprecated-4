@@ -21,30 +21,30 @@ async fn main() {
 
     let mut strategy = Duplicated::new(Interval::new(Custom::new(), 1000 * 60));
 
-    
-    
-    let mut simulated = Multi::new()
-        .with(Simulated::new(Hold::new(), 0.001, 13))
-        .with(Simulated::new(strategy, 0.001, 2));
+    #[cfg(not(feature = "live"))]
+    {
+        let mut simulated = Multi::new()
+            .with(Simulated::new(Hold::new(), 0.001, 13))
+            .with(Simulated::new(strategy, 0.001, 2));
 
-    Historical::new(
-        Utc.ymd(2021, 3, 1).and_hms(0, 0, 0), 
-        Utc::now(), 
-        true
-    ).run(&mut simulated).await;
-    println!("{}", simulated);
+        Historical::new(
+            Utc.ymd(2021, 3, 1).and_hms(0, 0, 0), 
+            Utc::now(), 
+            true
+        ).run(&mut simulated).await;
+        println!("{}", simulated);
+    }
     
-    
-    /*
-    let markets = vec![
-        "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
-        "LTCUSDT", "EOSUSDT", "DOTUSDT", "THETAUSDT", "LINKUSDT"
-    ];
+    #[cfg(feature = "live")]
+    {
+        let markets = vec![
+            "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
+            "LTCUSDT", "EOSUSDT", "DOTUSDT", "THETAUSDT", "LINKUSDT"
+        ];
 
-    Historical::new(Utc::now() - Duration::days(1), Utc::now(), false)
-        .run(&mut strategy)
-        .await;
-    Binance::new(markets, false).await.run(&mut strategy).await;
-    */
-    
+        Historical::new(Utc::now() - Duration::days(1), Utc::now(), false)
+            .run(&mut strategy)
+            .await;
+        Binance::new(markets, false).await.run(&mut strategy).await;
+    }
 }

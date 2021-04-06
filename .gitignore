@@ -4,4 +4,3 @@
 /.env.sandbox
 /trades.bin
 /scripts
-/strategies/custom.rs
