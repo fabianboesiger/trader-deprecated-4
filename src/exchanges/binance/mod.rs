@@ -5,7 +5,7 @@ use futures::{stream::BoxStream, StreamExt};
 use openlimits::{
     binance::{
         model::{
-            websocket::{BinanceWebsocketMessage, UserOrderUpdate, BinanceSubscription},
+            websocket::{BinanceSubscription},
             SymbolFilter,
         },
         Binance as OpenLimitsBinance, BinanceCredentials, BinanceParameters, BinanceWebsocket,
@@ -29,8 +29,11 @@ use tokio::time::{sleep, timeout, Duration};
 type Symbol = String;
 
 struct Position {
-    take_profit_id: u64,
-    stop_loss_id: u64,
+    market: Market,
+    quantity: Decimal,
+    buy_price: Decimal,
+    take_profit: Decimal,
+    stop_loss: Decimal,
 }
 
 struct Positions(Mutex<Vec<Position>>);
@@ -40,18 +43,18 @@ impl Positions {
         Positions(Mutex::new(Vec::new()))
     }
 
-    async fn terminate(&self, trade_id: u64) -> Option<bool> {
+    async fn check(&self, market: &Market, price: Decimal) -> Option<bool> {
         let mut positions = self.0.lock().await;
 
         let mut profitalbe = false;
         let mut index = None;
-        for (i, position) in positions.iter().enumerate() {
-            if position.take_profit_id == trade_id {
-                profitalbe = true;
+        for (i, position) in positions.iter().enumerate().filter(|(_, position)| position.market == *market) {
+            if price <= position.stop_loss {
                 index = Some(i);
             }
-            if position.stop_loss_id == trade_id {
+            if price >= position.take_profit {
                 index = Some(i);
+                profitalbe = true;
             }
         }
 
@@ -179,7 +182,7 @@ impl FilteredOrder {
 
                 log::info!("Placing OCO order.");
 
-                let result = inner
+                inner
                     .oco_sell(
                         pair,
                         buy_order.size,
@@ -190,14 +193,17 @@ impl FilteredOrder {
                     )
                     .await?;
 
-                let take_profit_id = result.order_reports.iter().filter(|order| order.type_name == "LIMIT_MAKER").map(|order| order.order_id).next().unwrap();
-                let stop_loss_id = result.order_reports.iter().filter(|order| order.type_name == "STOP_LOSS_LIMIT").map(|order| order.order_id).next().unwrap();
+                //let take_profit_id = result.order_reports.iter().filter(|order| order.type_name == "LIMIT_MAKER").map(|order| order.order_id).next().unwrap();
+                //let stop_loss_id = result.order_reports.iter().filter(|order| order.type_name == "STOP_LOSS_LIMIT").map(|order| order.order_id).next().unwrap();
 
                 log::info!("Placing OCO order was successful!");
 
                 Some(Position {
-                    take_profit_id,
-                    stop_loss_id,
+                    market: self.market,
+                    quantity: buy_order.size,
+                    buy_price: buy_order.price.unwrap(),
+                    take_profit: self.take_profit_price,
+                    stop_loss: self.stop_price
                 })
             } else {
                 log::info!("Entry order was killed.");
@@ -380,22 +386,21 @@ impl<S: Strategy + 'static> Exchange<S> for Binance {
 impl Binance {
     async fn connect_websocket(
         &self,
-    ) -> OpenLimitsResult<
-        (String, BoxStream<
+    ) -> OpenLimitsResult<BoxStream<
             'static,
             OpenLimitsResult<WebSocketResponse<<BinanceWebsocket as ExchangeWs>::Response>>,
-        >),
+        >,
     > {
-        let mut subscriptions = self
+        let subscriptions = self
             .markets
             .iter()
             .map(|symbol| BinanceSubscription::Trade(symbol.to_lowercase().to_string()))
             .collect::<Vec<BinanceSubscription>>();
 
-        let inner = self.exchange.inner_client().unwrap();
-        let user_data = inner.user_stream_start().await?;
+        //let inner = self.exchange.inner_client().unwrap();
+        //let user_data = inner.user_stream_start().await?;
 
-        subscriptions.push(BinanceSubscription::UserData(user_data.listen_key.clone()));
+        //subscriptions.push(BinanceSubscription::UserData(user_data.listen_key.clone()));
 
         let stream = OpenLimitsWs {
             websocket: BinanceWebsocket::new(if self.sandbox {
@@ -408,13 +413,13 @@ impl Binance {
         .create_stream(&subscriptions)
         .await?;
 
-        Ok((user_data.listen_key, stream))
+        Ok(stream)
     }
 
     async fn produce_trades(&self, tx: UnboundedSender<Trade>) {
         loop {
-            if let Ok((listen_key, mut stream)) = self.connect_websocket().await {
-
+            if let Ok(mut stream) = self.connect_websocket().await {
+                /*
                 tokio::select! {
                     _ = async {
                         let mut interval = tokio::time::interval(Duration::from_secs(60 * 30));
@@ -428,59 +433,76 @@ impl Binance {
                         log::warn!("User data stream timeout, trying to reconnect.");
                     } => {}
                     _ = async {
-                        log::info!("Trade stream started!");
-                        while let Ok(Some(Ok(message))) = timeout(
-                            Duration::from_secs(if self.sandbox { 500 } else { 5 }),
-                            stream.next(),
-                        )
-                        .await
-                        {
-                            match message {
-                                WebSocketResponse::Generic(OpenLimitsWebSocketMessage::Trades(trades)) => {
-                                    for trade in trades {
-                                        let market = trade.market_pair;
-                                        let quantity = match trade.side {
-                                            Side::Buy => -trade.qty,
-                                            Side::Sell => trade.qty,
-                                        };
-                                        let price = trade.price;
-                                        let timestamp = trade.created_at as i64;
+                        */
+                    log::info!("Trade stream started!");
+                    while let Ok(Some(Ok(message))) = timeout(
+                        Duration::from_secs(if self.sandbox { 500 } else { 5 }),
+                        stream.next(),
+                    )
+                    .await
+                    {
+                        match message {
+                            WebSocketResponse::Generic(OpenLimitsWebSocketMessage::Trades(trades)) => {
+                                for trade in trades {
+                                    let market = trade.market_pair;
+                                    let quantity = match trade.side {
+                                        Side::Buy => -trade.qty,
+                                        Side::Sell => trade.qty,
+                                    };
+                                    let price = trade.price;
+                                    let timestamp = trade.created_at as i64;
 
-                                        let trade = Trade {
-                                            market,
-                                            quantity: quantity.to_f32().unwrap(),
-                                            price: price.to_f32().unwrap(),
-                                            timestamp,
-                                        };
-
-                                        tx.send(trade).unwrap();
-                                    }
-                                }
-                                WebSocketResponse::Raw(BinanceWebsocketMessage::UserOrderUpdate(
-                                    UserOrderUpdate { trade_id, order_status, event_time, .. },
-                                )) => {
-                                    if order_status == openlimits::binance::model::OrderStatus::Filled || order_status == openlimits::binance::model::OrderStatus::PartiallyFilled {
-                                        if let Some(profitable) = self.positions.terminate(trade_id as u64).await {
-                                            if profitable {
-                                                log::info!("Last trade was profitable.");
+                                    if let Some(profitable) = self.positions.check(&market, price).await {
+                                        if profitable {
+                                            log::info!("Last trade was profitable.");
+                                            self.consecutive_losses.store(0, Ordering::Relaxed);
+                                        } else {
+                                            log::info!("Last trade was unprofitable.");
+                                            self.consecutive_losses.fetch_add(1, Ordering::Relaxed);
+                                            if self.consecutive_losses.load(Ordering::Relaxed) >= 2 {
+                                                self.wait_until.store(timestamp as u64 + 1000 * 60 * 60 * 12, Ordering::Relaxed);
                                                 self.consecutive_losses.store(0, Ordering::Relaxed);
-                                            } else {
-                                                log::info!("Last trade was unprofitable.");
-                                                self.consecutive_losses.fetch_add(1, Ordering::Relaxed);
-                                                if self.consecutive_losses.load(Ordering::Relaxed) >= 2 {
-                                                    self.wait_until.store(event_time + 1000 * 60 * 60 * 12, Ordering::Relaxed);
-                                                    self.consecutive_losses.store(0, Ordering::Relaxed);
-                                                }
+                                            }
+                                        }
+                                    }
+
+                                    let trade = Trade {
+                                        market,
+                                        quantity: quantity.to_f32().unwrap(),
+                                        price: price.to_f32().unwrap(),
+                                        timestamp,
+                                    };
+
+                                    tx.send(trade).unwrap();
+                                }
+                            }
+                            /*
+                            WebSocketResponse::Raw(BinanceWebsocketMessage::UserOrderUpdate(
+                                UserOrderUpdate { trade_id, order_status, event_time, .. },
+                            )) => {
+                                if order_status == openlimits::binance::model::OrderStatus::Filled || order_status == openlimits::binance::model::OrderStatus::PartiallyFilled {
+                                    if let Some(profitable) = self.positions.terminate(trade_id as u64).await {
+                                        if profitable {
+                                            log::info!("Last trade was profitable.");
+                                            self.consecutive_losses.store(0, Ordering::Relaxed);
+                                        } else {
+                                            log::info!("Last trade was unprofitable.");
+                                            self.consecutive_losses.fetch_add(1, Ordering::Relaxed);
+                                            if self.consecutive_losses.load(Ordering::Relaxed) >= 2 {
+                                                self.wait_until.store(event_time + 1000 * 60 * 60 * 12, Ordering::Relaxed);
+                                                self.consecutive_losses.store(0, Ordering::Relaxed);
                                             }
                                         }
                                     }
                                 }
-                                _ => (),
                             }
+                            */
+                            _ => (),
                         }
-                        log::warn!("Message timeout, trying to reconnect.");
-                    } => {}
-                }
+                    }
+                    log::warn!("Message timeout, trying to reconnect.");
+                    //} => {}
+                //}
                 
 
 

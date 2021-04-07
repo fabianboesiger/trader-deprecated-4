@@ -28,7 +28,7 @@ async fn main() {
             .with(Simulated::new(strategy, 0.001, 2));
 
         Historical::new(
-            Utc.ymd(2021, 3, 1).and_hms(0, 0, 0), 
+            Utc.ymd(2021, 4, 1).and_hms(0, 0, 0), 
             Utc::now(), 
             true
         ).run(&mut simulated).await;
