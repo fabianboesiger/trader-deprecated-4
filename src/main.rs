@@ -8,7 +8,7 @@ pub use error::Error;
 use exchanges::*;
 use strategies::*;
 
-use chrono::{Duration, Utc, TimeZone};
+use chrono::{Utc, TimeZone};
 
 type Number = f32;
 type Market = String;
@@ -17,18 +17,23 @@ type Market = String;
 async fn main() {
     dotenv::dotenv().ok();
     pretty_env_logger::init();
+
     log::info!("Starting trader.");
 
+    #[allow(unused_mut)]
     let mut strategy = Duplicated::new(Interval::new(Custom::new(), 1000 * 60));
 
     #[cfg(not(feature = "live"))]
     {
+        log::warn!("Trading in simulated environment.");
+
         let mut simulated = Multi::new()
             .with(Simulated::new(Hold::new(), 0.001, 13))
             .with(Simulated::new(strategy, 0.001, 2));
 
         Historical::new(
-            Utc.ymd(2021, 4, 1).and_hms(0, 0, 0), 
+            Utc.ymd(2021, 3, 1).and_hms(0, 0, 0), 
+            //Utc.ymd(2021, 4, 1).and_hms(0, 0, 0), 
             Utc::now(), 
             true
         ).run(&mut simulated).await;
@@ -37,6 +42,10 @@ async fn main() {
     
     #[cfg(feature = "live")]
     {
+        use chrono::Duration;
+
+        log::warn!("Trading on live exchange.");
+
         let markets = vec![
             "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
             "LTCUSDT", "EOSUSDT", "DOTUSDT", "THETAUSDT", "LINKUSDT"

@@ -44,13 +44,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_0() {
+    fn basic() {
         let mut bb = Bb::new(3.0, 1.0);
         bb.run(0.0);
         assert_eq!(bb.get_ma(), 0.0);
         assert_eq!(bb.get_upper(), 0.0);
         bb.run(16.0);
         assert_eq!(bb.get_ma(), 8.0);
-        assert_eq!(bb.get_upper(), 8.0 + (8.0 as Number).sqrt());
+        assert_eq!(bb.get_upper(), 8.0 + (32.0 as Number).sqrt());
     }
 }

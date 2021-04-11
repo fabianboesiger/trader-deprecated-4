@@ -23,6 +23,8 @@ pub struct Simulated<S> {
     closed: Vec<OrderHistory>,
     concurrency: usize,
     fee: f32,
+    consecutive_losses: u8,
+    wait_until: i64,
 }
 
 impl<S: Strategy> Simulated<S> {
@@ -33,6 +35,8 @@ impl<S: Strategy> Simulated<S> {
             closed: Vec::new(),
             concurrency,
             fee,
+            consecutive_losses: 0,
+            wait_until: 0,
         }
     }
 }
@@ -63,7 +67,7 @@ impl<S: Strategy> Strategy for Simulated<S> {
             assert_eq!(order.market, market);
             // TODO: Check if price is in range.
 
-            if self.open.len() < self.concurrency && !already_open {
+            if self.open.len() < self.concurrency && !already_open && self.wait_until < timestamp {
                 self.open.push(OrderHistory {
                     order,
                     buy_price: price,
@@ -84,6 +88,18 @@ impl<S: Strategy> Strategy for Simulated<S> {
                             .stop_loss
                             .map_or(false, |stop_loss| price <= stop_loss))
             });
+
+        for order in &closed {
+            if order.buy_price > order.sell_price {
+                self.consecutive_losses += 1;
+                if self.consecutive_losses >= 2 {
+                    self.consecutive_losses = 0;
+                    self.wait_until = timestamp + 1000 * 60 * 60 * 12;
+                }
+            } else {
+                self.consecutive_losses = 0;
+            }
+        }
 
         self.open.append(&mut open);
         self.closed.append(&mut closed);

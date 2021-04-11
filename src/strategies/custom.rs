@@ -20,12 +20,12 @@ pub struct Custom {
 impl Custom {
     pub fn new() -> Self {
         Self {
-            val: Val::new(200.0, 2000.0),
-            diff: Ema::new(30.0),
-            diff_stdev: Stdev::new(200.0),
-            hist_stdev: Stdev::new(200.0),
-            macd: Macd::new(10.0, 20.0, 5.0),
-            stdev: Stdev::new(200.0),
+            val: Val::new(10000.0, 10000.0),
+            diff: Ema::new(200.0),
+            macd: Macd::new(100.0, 200.0, 50.0),
+            diff_stdev: Stdev::new(2000.0),
+            hist_stdev: Stdev::new(2000.0),
+            stdev: Stdev::new(2000.0),
             was_undervalued: false,
             bought_at: 0,
         }
@@ -52,9 +52,8 @@ impl Strategy for Custom {
         self.hist_stdev.run(self.macd.get_hist());
 
         let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 1.2;
-        let worth_it = 1.0 * self.stdev.get() > price * 0.01;
-        let has_momentum =
-            self.macd.get_hist() > 0.0 && self.macd.get_hist() < 1.0 * self.hist_stdev.get();
+        let worth_it = 1.4 * self.stdev.get() > price * 0.01;
+        let has_momentum = self.macd.get_hist() > 0.0;
 
         let action = if
             !is_undervalued &&
@@ -67,8 +66,8 @@ impl Strategy for Custom {
             Some(Order {
                 market,
                 price,
-                take_profit: Some(price + 1.2 * self.stdev.get()),
-                stop_loss: Some(price - 1.0 * self.stdev.get()),
+                take_profit: Some(price + 1.4 * self.stdev.get()),
+                stop_loss: Some(price - 1.2 * self.stdev.get()),
                 side: Side::Buy,
             })
         } else {
