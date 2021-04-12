@@ -1,5 +1,5 @@
-mod binance;
-mod historical;
+pub mod binance;
+pub mod historical;
 
 pub use binance::Binance;
 pub use historical::Historical;

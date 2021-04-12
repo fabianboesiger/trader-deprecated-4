@@ -1,9 +1,10 @@
 use openlimits::errors::OpenLimitsError;
+use crate::exchanges::binance::FilterError;
 
 #[derive(Debug)]
 pub enum Error {
     OpenLimits(OpenLimitsError),
-    Filter,
+    Filter(FilterError),
 }
 
 impl From<OpenLimitsError> for Error {

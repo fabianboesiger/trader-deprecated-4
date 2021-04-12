@@ -145,6 +145,16 @@ impl FilteredOrder {
     }
 }
 
+#[derive(Debug)]
+pub enum FilterError {
+    MinQty,
+    MaxQty,
+    MinPrice,
+    MaxPrice,
+    MinNotional,
+    NoTickSize,
+}
+
 struct Filters(Vec<SymbolFilter>);
 
 impl Filters {
@@ -173,7 +183,7 @@ impl Filters {
             }
         }
 
-        Err(Error::Filter)
+        Err(Error::Filter(FilterError::NoTickSize))
     }
 
     fn quantity(&self, mut quantity: Decimal) -> Result<Decimal, Error> {
@@ -185,10 +195,10 @@ impl Filters {
                     step_size,
                 } if step_size > Decimal::zero() => {
                     if quantity < min_qty {
-                        return Err(Error::Filter);
+                        return Err(Error::Filter(FilterError::MinQty));
                     }
                     if quantity > max_qty {
-                        return Err(Error::Filter);
+                        return Err(Error::Filter(FilterError::MaxQty));
                     }
                     quantity = (quantity / step_size)
                         .round_dp_with_strategy(0, RoundingStrategy::RoundDown)
@@ -200,10 +210,10 @@ impl Filters {
                     step_size,
                 } if step_size > Decimal::zero() => {
                     if quantity < min_qty {
-                        return Err(Error::Filter);
+                        return Err(Error::Filter(FilterError::MinQty));
                     }
                     if quantity > max_qty {
-                        return Err(Error::Filter);
+                        return Err(Error::Filter(FilterError::MaxQty));
                     }
                     quantity = (quantity / step_size)
                         .round_dp_with_strategy(0, RoundingStrategy::RoundDown)
@@ -227,16 +237,16 @@ impl Filters {
                     tick_size,
                 } if tick_size > Decimal::zero() => {
                     if price < min_price {
-                        return Err(Error::Filter);
+                        return Err(Error::Filter(FilterError::MinPrice));
                     }
                     if price > max_price {
-                        return Err(Error::Filter);
+                        return Err(Error::Filter(FilterError::MaxPrice));
                     }
                     price = (price / tick_size).round() * tick_size;
                 }
                 SymbolFilter::MinNotional { min_notional } => {
                     if price * quantity < *min_notional {
-                        return Err(Error::Filter);
+                        return Err(Error::Filter(FilterError::MinNotional));
                     }
                 }
                 _ => (),
