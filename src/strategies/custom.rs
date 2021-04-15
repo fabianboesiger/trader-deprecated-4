@@ -111,6 +111,7 @@ impl Strategy for Custom {
         action
     }
 
+    #[cfg(feature = "plot")]
     fn plot(&self) {
         log::info!("Generating plot ...");
 

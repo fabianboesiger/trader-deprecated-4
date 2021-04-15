@@ -35,6 +35,7 @@ impl Strategy for Random {
         }
     }
 
+    #[cfg(feature = "plot")]
     fn plot(&self) {}
 }
 

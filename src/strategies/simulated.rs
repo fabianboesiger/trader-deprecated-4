@@ -107,6 +107,7 @@ impl<S: Strategy> Strategy for Simulated<S> {
         None
     }
 
+    #[cfg(feature = "plot")]
     fn plot(&self) {
         self.strategy.plot()
     }

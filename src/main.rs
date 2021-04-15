@@ -40,6 +40,8 @@ async fn main() {
             .await;
 
         println!("{}", simulated);
+
+        #[cfg(feature = "plot")]
         simulated.plot();
     }
 

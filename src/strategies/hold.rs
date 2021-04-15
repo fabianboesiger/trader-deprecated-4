@@ -22,6 +22,7 @@ impl Strategy for Hold {
         })
     }
 
+    #[cfg(feature = "plot")]
     fn plot(&self) {}
 }
 

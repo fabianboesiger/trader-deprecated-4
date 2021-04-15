@@ -27,6 +27,7 @@ impl<S: Strategy + Clone> Strategy for Duplicated<S> {
             .run(trade)
     }
 
+    #[cfg(feature = "plot")]
     fn plot(&self) {
         for strategy in self.strategies.values() {
             strategy.plot();

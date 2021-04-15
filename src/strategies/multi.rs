@@ -29,6 +29,7 @@ impl Strategy for Multi {
         None
     }
 
+    #[cfg(feature = "plot")]
     fn plot(&self) {
         for strategy in &self.strategies {
             strategy.plot();

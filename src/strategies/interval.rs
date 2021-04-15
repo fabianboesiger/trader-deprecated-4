@@ -39,6 +39,7 @@ impl<S: Strategy + Clone> Strategy for Interval<S> {
         }
     }
 
+    #[cfg(feature = "plot")]
     fn plot(&self) {
         self.strategy.plot()
     }
