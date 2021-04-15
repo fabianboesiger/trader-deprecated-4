@@ -21,6 +21,8 @@ impl Strategy for Hold {
             side: Side::Buy,
         })
     }
+
+    fn plot(&self) {}
 }
 
 impl fmt::Display for Hold {

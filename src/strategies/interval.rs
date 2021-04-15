@@ -38,6 +38,10 @@ impl<S: Strategy + Clone> Strategy for Interval<S> {
             None
         }
     }
+
+    fn plot(&self) {
+        self.strategy.plot()
+    }
 }
 
 impl<S: Strategy + Clone> fmt::Display for Interval<S> {

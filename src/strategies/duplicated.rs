@@ -26,6 +26,12 @@ impl<S: Strategy + Clone> Strategy for Duplicated<S> {
             .or_insert(self.strategy.clone())
             .run(trade)
     }
+
+    fn plot(&self) {
+        for strategy in self.strategies.values() {
+            strategy.plot();
+        }
+    }
 }
 
 impl<S: Strategy + Clone> fmt::Display for Duplicated<S> {

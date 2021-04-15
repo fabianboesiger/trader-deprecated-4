@@ -1,6 +1,10 @@
+#![forbid(unstable_features)]
+#![forbid(unsafe_code)]
+
 mod error;
 pub mod exchanges;
 pub mod indicators;
+pub mod loggers;
 pub mod strategies;
 
 pub use error::Error;
@@ -8,7 +12,7 @@ pub use error::Error;
 use exchanges::*;
 use strategies::*;
 
-use chrono::{Utc, TimeZone};
+use chrono::{TimeZone, Utc};
 
 type Number = f32;
 type Market = String;
@@ -31,15 +35,14 @@ async fn main() {
             .with(Simulated::new(Hold::new(), 0.001, 13))
             .with(Simulated::new(strategy, 0.001, 2));
 
-        Historical::new(
-            Utc.ymd(2021, 3, 1).and_hms(0, 0, 0), 
-            //Utc.ymd(2021, 4, 1).and_hms(0, 0, 0), 
-            Utc::now(), 
-            true
-        ).run(&mut simulated).await;
+        Historical::new(Utc.ymd(2021, 4, 1).and_hms(0, 0, 0), Utc::now(), true)
+            .run(&mut simulated)
+            .await;
+
         println!("{}", simulated);
+        simulated.plot();
     }
-    
+
     #[cfg(feature = "live")]
     {
         use chrono::Duration;
@@ -47,13 +50,24 @@ async fn main() {
         log::warn!("Trading on live exchange.");
 
         let markets = vec![
-            "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
-            "LTCUSDT", "EOSUSDT", "DOTUSDT", "THETAUSDT", "LINKUSDT"
+            "BTCUSDT",
+            "ETHUSDT",
+            "CHZUSDT",
+            "BNBUSDT",
+            "DOGEUSDT",
+            "ADAUSDT",
+            "BCHUSDT",
+            "XRPUSDT",
+            "LTCUSDT",
+            "EOSUSDT",
+            "DOTUSDT",
+            "THETAUSDT",
+            "LINKUSDT",
         ];
-
+        /*
         Historical::new(Utc::now() - Duration::days(1), Utc::now(), false)
             .run(&mut strategy)
-            .await;
+            .await;*/
         Binance::new(markets, false).await.run(&mut strategy).await;
     }
 }

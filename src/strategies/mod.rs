@@ -19,4 +19,5 @@ use std::fmt::Display;
 
 pub trait Strategy: Display + Send + 'static {
     fn run(&mut self, trade: Trade) -> Option<Order>;
+    fn plot(&self);
 }

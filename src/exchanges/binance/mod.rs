@@ -1,16 +1,15 @@
 mod wallet;
 
 use super::{Exchange, Order, Strategy, Trade};
-use crate::{Error, Market, Number};
-use wallet::Wallet;
+use crate::{
+    loggers::{Logger, Message, Sender, Telegram},
+    Error, Market, Number,
+};
 use async_trait::async_trait;
 use futures::{stream::BoxStream, StreamExt};
 use openlimits::{
     binance::{
-        model::{
-            websocket::{BinanceSubscription},
-            SymbolFilter,
-        },
+        model::{websocket::BinanceSubscription, SymbolFilter},
         Binance as OpenLimitsBinance, BinanceCredentials, BinanceParameters, BinanceWebsocket,
     },
     exchange::{Exchange as OpenLimitsExchange, ExchangeAccount},
@@ -20,39 +19,55 @@ use openlimits::{
         websocket::{OpenLimitsWebSocketMessage, WebSocketResponse},
         Side,
     },
-    model::{OpenMarketOrderRequest, TimeInForce, OrderStatus},
+    model::{OpenMarketOrderRequest, OrderStatus, TimeInForce},
     shared::Result as OpenLimitsResult,
 };
 use rust_decimal::prelude::*;
-use std::{collections::HashMap, sync::atomic::{AtomicU8, AtomicU64, Ordering}};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU64, AtomicU8, Ordering},
+};
 use tokio::{
-    time::{sleep, timeout, Duration},
     sync::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
         Mutex,
-    }
+    },
+    time::{sleep, timeout, Duration},
 };
-struct Position {
-    market: Market,
-    //quantity: Decimal,
-    //buy_price: Decimal,
-    take_profit: Decimal,
-    stop_loss: Decimal,
+use wallet::Wallet;
+
+#[derive(Clone)]
+pub struct Position {
+    pub market: Market,
+    pub quantity: Decimal,
+    pub buy_price: Decimal,
+    pub take_profit: Decimal,
+    pub stop_loss: Decimal,
 }
 
-struct Positions(Mutex<Vec<Position>>);
+struct Positions {
+    positions: Mutex<Vec<Position>>,
+    sender: Sender,
+}
 
 impl Positions {
-    fn new() -> Self {
-        Positions(Mutex::new(Vec::new()))
+    fn new(sender: Sender) -> Self {
+        Positions {
+            positions: Mutex::new(Vec::new()),
+            sender,
+        }
     }
 
     async fn check(&self, market: &Market, price: Decimal) -> Option<bool> {
-        let mut positions = self.0.lock().await;
+        let mut positions = self.positions.lock().await;
 
         let mut profitalbe = false;
         let mut index = None;
-        for (i, position) in positions.iter().enumerate().filter(|(_, position)| position.market == *market) {
+        for (i, position) in positions
+            .iter()
+            .enumerate()
+            .filter(|(_, position)| position.market == *market)
+        {
             if price <= position.stop_loss {
                 index = Some(i);
             }
@@ -63,6 +78,12 @@ impl Positions {
         }
 
         if let Some(index) = index {
+            self.sender
+                .send(Message::Close(
+                    positions.get(index).unwrap().clone(),
+                    profitalbe,
+                ))
+                .ok();
             positions.remove(index);
             Some(profitalbe)
         } else {
@@ -71,7 +92,8 @@ impl Positions {
     }
 
     async fn open(&self, position: Position) {
-        self.0.lock().await.push(position);
+        self.sender.send(Message::Open(position.clone())).ok();
+        self.positions.lock().await.push(position);
     }
 }
 
@@ -85,6 +107,12 @@ struct FilteredOrder {
 }
 
 impl FilteredOrder {
+    #[cfg(feature = "stop-orders")]
+    async fn order(self, exchange: &OpenLimitsBinance) -> OpenLimitsResult<Option<Position>> {
+        Ok(None)
+    }
+
+    #[cfg(not(feature = "stop-orders"))]
     async fn order(self, exchange: &OpenLimitsBinance) -> OpenLimitsResult<Option<Position>> {
         Ok(if self.quote_quantity > Decimal::zero() {
             log::info!("Placing entry order.");
@@ -129,10 +157,10 @@ impl FilteredOrder {
 
                 Some(Position {
                     market: self.market,
-                    //quantity: buy_order.size,
-                    //buy_price: buy_order.price.unwrap(),
+                    quantity: buy_order.size,
+                    buy_price: buy_order.price.unwrap(),
                     take_profit: self.take_profit_price,
-                    stop_loss: self.stop_price
+                    stop_loss: self.stop_price,
                 })
             } else {
                 log::info!("Entry order was killed.");
@@ -299,10 +327,15 @@ impl Binance {
             )
             .collect();
 
+        let (mut telegram, sender) = Telegram::new();
+        tokio::task::spawn(async move {
+            telegram.run().await;
+        });
+
         Self {
             sandbox,
             wallet: Wallet::new(),
-            positions: Positions::new(),
+            positions: Positions::new(sender),
             markets: markets.into_iter().map(String::from).collect(),
             exchange,
             filters,
@@ -325,7 +358,8 @@ impl<S: Strategy + 'static> Exchange<S> for Binance {
 impl Binance {
     async fn connect_websocket(
         &self,
-    ) -> OpenLimitsResult<BoxStream<
+    ) -> OpenLimitsResult<
+        BoxStream<
             'static,
             OpenLimitsResult<WebSocketResponse<<BinanceWebsocket as ExchangeWs>::Response>>,
         >,
@@ -373,78 +407,79 @@ impl Binance {
                     } => {}
                     _ = async {
                         */
-                    log::info!("Trade stream started!");
-                    while let Ok(Some(Ok(message))) = timeout(
-                        Duration::from_secs(if self.sandbox { 500 } else { 5 }),
-                        stream.next(),
-                    )
-                    .await
-                    {
-                        match message {
-                            WebSocketResponse::Generic(OpenLimitsWebSocketMessage::Trades(trades)) => {
-                                for trade in trades {
-                                    let market = trade.market_pair;
-                                    let quantity = match trade.side {
-                                        Side::Buy => -trade.qty,
-                                        Side::Sell => trade.qty,
-                                    };
-                                    let price = trade.price;
-                                    let timestamp = trade.created_at as i64;
+                log::info!("Trade stream started!");
+                while let Ok(Some(Ok(message))) = timeout(
+                    Duration::from_secs(if self.sandbox { 500 } else { 5 }),
+                    stream.next(),
+                )
+                .await
+                {
+                    match message {
+                        WebSocketResponse::Generic(OpenLimitsWebSocketMessage::Trades(trades)) => {
+                            for trade in trades {
+                                let market = trade.market_pair;
+                                let quantity = match trade.side {
+                                    Side::Buy => -trade.qty,
+                                    Side::Sell => trade.qty,
+                                };
+                                let price = trade.price;
+                                let timestamp = trade.created_at as i64;
 
-                                    if let Some(profitable) = self.positions.check(&market, price).await {
-                                        if profitable {
-                                            log::info!("Last trade was profitable.");
+                                if let Some(profitable) = self.positions.check(&market, price).await
+                                {
+                                    if profitable {
+                                        log::info!("Last trade was profitable.");
+                                        self.consecutive_losses.store(0, Ordering::Relaxed);
+                                    } else {
+                                        log::info!("Last trade was unprofitable.");
+                                        self.consecutive_losses.fetch_add(1, Ordering::Relaxed);
+                                        if self.consecutive_losses.load(Ordering::Relaxed) >= 2 {
+                                            self.wait_until.store(
+                                                timestamp as u64 + 1000 * 60 * 60 * 12,
+                                                Ordering::Relaxed,
+                                            );
                                             self.consecutive_losses.store(0, Ordering::Relaxed);
-                                        } else {
-                                            log::info!("Last trade was unprofitable.");
-                                            self.consecutive_losses.fetch_add(1, Ordering::Relaxed);
-                                            if self.consecutive_losses.load(Ordering::Relaxed) >= 2 {
-                                                self.wait_until.store(timestamp as u64 + 1000 * 60 * 60 * 12, Ordering::Relaxed);
-                                                self.consecutive_losses.store(0, Ordering::Relaxed);
-                                            }
-                                        }
-                                    }
-
-                                    let trade = Trade {
-                                        market,
-                                        quantity: quantity.to_f32().unwrap(),
-                                        price: price.to_f32().unwrap(),
-                                        timestamp,
-                                    };
-
-                                    tx.send(trade).unwrap();
-                                }
-                            }
-                            /*
-                            WebSocketResponse::Raw(BinanceWebsocketMessage::UserOrderUpdate(
-                                UserOrderUpdate { trade_id, order_status, event_time, .. },
-                            )) => {
-                                if order_status == openlimits::binance::model::OrderStatus::Filled || order_status == openlimits::binance::model::OrderStatus::PartiallyFilled {
-                                    if let Some(profitable) = self.positions.terminate(trade_id as u64).await {
-                                        if profitable {
-                                            log::info!("Last trade was profitable.");
-                                            self.consecutive_losses.store(0, Ordering::Relaxed);
-                                        } else {
-                                            log::info!("Last trade was unprofitable.");
-                                            self.consecutive_losses.fetch_add(1, Ordering::Relaxed);
-                                            if self.consecutive_losses.load(Ordering::Relaxed) >= 2 {
-                                                self.wait_until.store(event_time + 1000 * 60 * 60 * 12, Ordering::Relaxed);
-                                                self.consecutive_losses.store(0, Ordering::Relaxed);
-                                            }
                                         }
                                     }
                                 }
+
+                                let trade = Trade {
+                                    market,
+                                    quantity: quantity.to_f32().unwrap(),
+                                    price: price.to_f32().unwrap(),
+                                    timestamp,
+                                };
+
+                                tx.send(trade).unwrap();
                             }
-                            */
-                            _ => (),
                         }
+                        /*
+                        WebSocketResponse::Raw(BinanceWebsocketMessage::UserOrderUpdate(
+                            UserOrderUpdate { trade_id, order_status, event_time, .. },
+                        )) => {
+                            if order_status == openlimits::binance::model::OrderStatus::Filled || order_status == openlimits::binance::model::OrderStatus::PartiallyFilled {
+                                if let Some(profitable) = self.positions.terminate(trade_id as u64).await {
+                                    if profitable {
+                                        log::info!("Last trade was profitable.");
+                                        self.consecutive_losses.store(0, Ordering::Relaxed);
+                                    } else {
+                                        log::info!("Last trade was unprofitable.");
+                                        self.consecutive_losses.fetch_add(1, Ordering::Relaxed);
+                                        if self.consecutive_losses.load(Ordering::Relaxed) >= 2 {
+                                            self.wait_until.store(event_time + 1000 * 60 * 60 * 12, Ordering::Relaxed);
+                                            self.consecutive_losses.store(0, Ordering::Relaxed);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        */
+                        _ => (),
                     }
-                    log::warn!("Message timeout, trying to reconnect.");
-                    //} => {}
+                }
+                log::warn!("Message timeout, trying to reconnect.");
+                //} => {}
                 //}
-                
-
-
             } else {
                 log::warn!("Unable to reach websocket, trying to reconnect.");
                 sleep(Duration::from_secs(5)).await;
@@ -489,17 +524,23 @@ impl Binance {
         //filters.apply(order, quantity).unwrap();
 
         self.wallet.update(&self.exchange).await?;
+        log::info!("{:#?}", self.wallet);
         let pair = self.exchange.get_pair(&order.market).await?.read()?;
 
         let base_quantity = self.wallet.value(pair.base.clone()).await;
-        let not_invested = (pair.base == Wallet::FEE_ASSET && base_quantity < Decimal::new(60, 0)) || base_quantity < Decimal::new(10, 0);
+        let not_invested = (pair.base == Wallet::FEE_ASSET && base_quantity < Decimal::new(60, 0))
+            || base_quantity < Decimal::new(10, 0);
         if not_invested {
             if self.wait_until.load(Ordering::Relaxed) < timestamp {
                 let total = self.wallet.total_value().await;
                 let min_quantity =
-                    (total - Decimal::new(50, 0)) / Decimal::new(2, 0);
-                let quantity =
-                    determine_investment_amount(min_quantity, self.wallet.value(Wallet::QUOTE_ASSET).await) * Decimal::new(99, 2);
+                    (total - Decimal::new(50, 0)) / Decimal::new(2, 0) * Decimal::new(90, 2);
+                log::info!("Total value is {}, buying at least {}", total, min_quantity);
+                let quantity = determine_investment_amount(
+                    min_quantity,
+                    self.wallet.value(Wallet::QUOTE_ASSET).await,
+                ) * Decimal::new(99, 2);
+                log::info!("Placing order of size {}", quantity);
                 let filtered_order = self
                     .filters
                     .get(&order.market)
@@ -555,6 +596,10 @@ mod tests {
         assert_eq!(
             determine_investment_amount(Decimal::new(15, 0), Decimal::new(20, 0)),
             Decimal::new(20, 0)
+        );
+        assert_eq!(
+            determine_investment_amount(Decimal::new(75, 0), Decimal::new(160, 0)),
+            Decimal::new(75, 0)
         );
     }
 }

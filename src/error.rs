@@ -1,5 +1,5 @@
-use openlimits::errors::OpenLimitsError;
 use crate::exchanges::binance::FilterError;
+use openlimits::errors::OpenLimitsError;
 
 #[derive(Debug)]
 pub enum Error {

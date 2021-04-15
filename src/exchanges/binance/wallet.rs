@@ -1,15 +1,12 @@
 use crate::{Error, Market};
-use openlimits::{
-    binance::Binance as OpenLimitsBinance,
-    exchange::ExchangeAccount,
-};
+use openlimits::{binance::Binance as OpenLimitsBinance, exchange::ExchangeAccount};
 use rust_decimal::prelude::*;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 
 type Symbol = String;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Asset {
     price: Decimal,
     quantity: Decimal,
@@ -21,6 +18,7 @@ impl Asset {
     }
 }
 
+#[derive(Debug)]
 pub struct Wallet(Mutex<HashMap<Symbol, Asset>>);
 
 impl Wallet {
@@ -60,7 +58,7 @@ impl Wallet {
             .or_default()
             .price = price;
     }
-    
+
     pub async fn update_quantity(&self, asset: Symbol, quantity: Decimal) {
         self.0.lock().await.entry(asset).or_default().quantity = quantity;
     }

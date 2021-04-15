@@ -106,6 +106,10 @@ impl<S: Strategy> Strategy for Simulated<S> {
 
         None
     }
+
+    fn plot(&self) {
+        self.strategy.plot()
+    }
 }
 
 impl<S: Strategy> fmt::Display for Simulated<S> {

@@ -4,3 +4,4 @@
 /.env.sandbox
 /trades.bin
 /scripts
+/plots

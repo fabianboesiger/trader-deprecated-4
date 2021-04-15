@@ -34,6 +34,8 @@ impl Strategy for Random {
             None
         }
     }
+
+    fn plot(&self) {}
 }
 
 impl fmt::Display for Random {

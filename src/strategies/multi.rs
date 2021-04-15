@@ -28,6 +28,12 @@ impl Strategy for Multi {
 
         None
     }
+
+    fn plot(&self) {
+        for strategy in &self.strategies {
+            strategy.plot();
+        }
+    }
 }
 
 impl fmt::Display for Multi {

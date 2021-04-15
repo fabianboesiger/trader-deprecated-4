@@ -41,7 +41,7 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                 .duration_since(metadata.modified().unwrap())
                 .unwrap()
                 .as_secs()
-                < 3600
+                < 3600 * 4
             && self.cache
         {
             let mut bin = Vec::new();
@@ -70,8 +70,19 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                 FROM grouped
                 ORDER BY timestamp ASC"#,
                 &vec![
-                    "BTCUSDT", "ETHUSDT", "CHZUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "BCHUSDT", "XRPUSDT",
-                    "LTCUSDT", "EOSUSDT", "DOTUSDT", "THETAUSDT", "LINKUSDT"
+                    "BTCUSDT",
+                    "ETHUSDT",
+                    "CHZUSDT",
+                    "BNBUSDT",
+                    "DOGEUSDT",
+                    "ADAUSDT",
+                    "BCHUSDT",
+                    "XRPUSDT",
+                    "LTCUSDT",
+                    "EOSUSDT",
+                    "DOTUSDT",
+                    "THETAUSDT",
+                    "LINKUSDT"
                 ]
                 .into_iter()
                 .map(String::from)
