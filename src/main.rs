@@ -66,10 +66,10 @@ async fn main() {
             "THETAUSDT",
             "LINKUSDT",
         ];
-        /*
+        
         Historical::new(Utc::now() - Duration::days(1), Utc::now(), false)
             .run(&mut strategy)
-            .await;*/
+            .await;
         Binance::new(markets, false).await.run(&mut strategy).await;
     }
 }

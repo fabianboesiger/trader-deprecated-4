@@ -85,7 +85,7 @@ impl Strategy for Custom {
             mean_reversal &&
             worth_it &&
             has_momentum &&
-            //is_bullish &&
+            is_bullish &&
             no_backoff
         {
             self.bought_at = timestamp;
