@@ -88,7 +88,8 @@ impl Strategy for Custom {
             });
         }
 
-        log::info!(
+        /*
+        log::trace!(
             "Running strategy: market={}, price={}, price_stdev={}, trend={}, momentum={}, diff={}, diff_stdev={}",
             market,
             price,
@@ -98,6 +99,7 @@ impl Strategy for Custom {
             self.diff.get(),
             self.diff_stdev.get(),
         );
+        */
 
         let action = if
             mean_reversal &&
