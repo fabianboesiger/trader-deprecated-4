@@ -32,13 +32,14 @@ impl Logger for Telegram {
                 rx,
                 channel_id,
             },
-            sender,
+            sender.into(),
         )
     }
 
     async fn run(&mut self) {
         log::info!("Starting logger.");
 
+        /*
         self.api
             .send(SendMessage::new(
                 self.channel_id,
@@ -46,6 +47,7 @@ impl Logger for Telegram {
             ))
             .await
             .unwrap();
+        */
 
         while let Some(message) = self.rx.recv().await {
             match message {
@@ -56,6 +58,8 @@ impl Logger for Telegram {
                     take_profit,
                     stop_loss,
                 }) => {
+                    log::info!("Logger received open position.");
+
                     let base_quantity = quantity / buy_price;
                     let base_take_profit = quantity / take_profit;
                     let base_stop_loss = quantity / stop_loss;
@@ -72,7 +76,7 @@ impl Logger for Telegram {
                                 base_stop_loss, asset, stop_loss
                             ),
                     )).await.unwrap();
-                }
+                },
                 Message::Close(
                     Position {
                         mut market,
@@ -83,6 +87,8 @@ impl Logger for Telegram {
                     },
                     profitable,
                 ) => {
+                    log::info!("Logger received close position.");
+
                     let base_quantity = quantity / buy_price;
                     let usdt_offset = market.find("USDT").unwrap();
                     let asset: String = market.drain(..usdt_offset).collect();

@@ -78,12 +78,10 @@ impl Positions {
         }
 
         if let Some(index) = index {
-            self.sender
-                .send(Message::Close(
+            self.sender.send(Message::Close(
                     positions.get(index).unwrap().clone(),
                     profitalbe,
-                ))
-                .ok();
+                ));
             positions.remove(index);
             Some(profitalbe)
         } else {
@@ -92,7 +90,7 @@ impl Positions {
     }
 
     async fn open(&self, position: Position) {
-        self.sender.send(Message::Open(position.clone())).ok();
+        self.sender.send(Message::Open(position.clone()));
         self.positions.lock().await.push(position);
     }
 }
@@ -524,7 +522,7 @@ impl Binance {
         //filters.apply(order, quantity).unwrap();
 
         self.wallet.update(&self.exchange).await?;
-        log::info!("{:#?}", self.wallet);
+        log::trace!("Wallet: {:#?}", self.wallet);
         let pair = self.exchange.get_pair(&order.market).await?.read()?;
 
         let base_quantity = self.wallet.value(pair.base.clone()).await;

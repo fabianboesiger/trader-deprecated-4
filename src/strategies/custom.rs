@@ -60,10 +60,6 @@ impl Strategy for Custom {
             timestamp,
         }: Trade,
     ) -> Option<Order> {
-        log::trace!("Running strategy.");
-
-        self.market = Some(market.clone());
-
         self.stdev.run(price);
         self.val.run(quantity, price);
         self.diff.run(price - self.val.get());
@@ -74,12 +70,34 @@ impl Strategy for Custom {
 
         let max_stdev = self.stdev.get().min(price * 0.05);
         let trend = self.macd_long.get();
+        let momentum = self.macd.get_hist();
         let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 1.8;
         let mean_reversal = !is_undervalued && self.was_undervalued;
         let worth_it = 1.4 * max_stdev > price * 0.01;
-        let has_momentum = self.macd.get_hist() > 0.0;
+        let has_momentum = momentum > 0.0;
         let is_bullish = trend > 0.0;
         let no_backoff = self.bought_at + 1000 * 60 * 60 * 12 < timestamp;
+
+        #[cfg(feature = "plot")]
+        {
+            self.market = Some(market.clone());
+            self.data.push(Data {
+                price,
+                timestamp,
+                val: self.val.get(),
+            });
+        }
+
+        log::info!(
+            "Running strategy: market={}, price={}, price_stdev={}, trend={}, momentum={}, diff={}, diff_stdev={}",
+            market,
+            price,
+            self.stdev.get(),
+            trend,
+            momentum,
+            self.diff.get(),
+            self.diff_stdev.get(),
+        );
 
         let action = if
             mean_reversal &&
@@ -101,12 +119,6 @@ impl Strategy for Custom {
         };
 
         self.was_undervalued = is_undervalued;
-
-        self.data.push(Data {
-            price,
-            timestamp,
-            val: self.val.get(),
-        });
 
         action
     }
