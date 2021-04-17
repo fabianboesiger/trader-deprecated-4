@@ -29,5 +29,5 @@ pub enum Message {
 #[async_trait]
 pub trait Logger: Sized {
     fn new() -> (Self, Sender);
-    async fn run(&mut self);
+    async fn run(mut self);
 }

@@ -36,7 +36,7 @@ use tokio::{
 };
 use wallet::Wallet;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Position {
     pub market: Market,
     pub quantity: Decimal,
@@ -78,6 +78,8 @@ impl Positions {
         }
 
         if let Some(index) = index {
+            log::info!("Closing postion: {:?}", positions.get(index).unwrap());
+
             self.sender.send(Message::Close(
                     positions.get(index).unwrap().clone(),
                     profitalbe,
@@ -90,6 +92,7 @@ impl Positions {
     }
 
     async fn open(&self, position: Position) {
+        log::info!("Opening postion: {:?}", position);
         self.sender.send(Message::Open(position.clone()));
         self.positions.lock().await.push(position);
     }
@@ -107,7 +110,13 @@ struct FilteredOrder {
 impl FilteredOrder {
     #[cfg(feature = "stop-orders")]
     async fn order(self, exchange: &OpenLimitsBinance) -> OpenLimitsResult<Option<Position>> {
-        Ok(None)
+        Ok(Some(Position {
+            market: self.market,
+            quantity: self.quote_quantity,
+            buy_price: self.buy_price,
+            take_profit: self.take_profit_price,
+            stop_loss: self.stop_price,
+        }))
     }
 
     #[cfg(not(feature = "stop-orders"))]
@@ -325,7 +334,7 @@ impl Binance {
             )
             .collect();
 
-        let (mut telegram, sender) = Telegram::new();
+        let (telegram, sender) = Telegram::new();
         tokio::task::spawn(async move {
             telegram.run().await;
         });
@@ -531,11 +540,11 @@ impl Binance {
         if not_invested {
             if self.wait_until.load(Ordering::Relaxed) < timestamp {
                 let total = self.wallet.total_value().await;
-                let min_quantity =
-                    (total - Decimal::new(50, 0)) / Decimal::new(2, 0) * Decimal::new(90, 2);
-                log::info!("Total value is {}, buying at least {}", total, min_quantity);
+                let want =
+                    (total - Decimal::new(50, 0)) / Decimal::new(2, 0);
+                log::info!("Total value is {}, want {}", total, want);
                 let quantity = determine_investment_amount(
-                    min_quantity,
+                    want,
                     self.wallet.value(Wallet::QUOTE_ASSET).await,
                 ) * Decimal::new(99, 2);
                 log::info!("Placing order of size {}", quantity);
@@ -559,13 +568,15 @@ impl Binance {
     }
 }
 
-fn determine_investment_amount(minimum: Decimal, available: Decimal) -> Decimal {
-    assert!(minimum > Decimal::zero());
+fn determine_investment_amount(want: Decimal, available: Decimal) -> Decimal {
+    assert!(want > Decimal::zero());
 
-    let fraction_investment = available / minimum;
+    let fraction_investment = available / want;
     if fraction_investment >= Decimal::new(2, 0) {
-        minimum
+        want
     } else if fraction_investment >= Decimal::new(1, 0) {
+        available
+    } else if fraction_investment >= Decimal::new(5, 1) {
         available
     } else {
         Decimal::zero()
@@ -598,6 +609,10 @@ mod tests {
         assert_eq!(
             determine_investment_amount(Decimal::new(75, 0), Decimal::new(160, 0)),
             Decimal::new(75, 0)
+        );
+        assert_eq!(
+            determine_investment_amount(Decimal::new(70, 0), Decimal::new(50, 0)),
+            Decimal::new(50, 0)
         );
     }
 }

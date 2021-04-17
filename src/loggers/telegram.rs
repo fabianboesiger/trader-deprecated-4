@@ -7,7 +7,7 @@ use telegram_bot::{requests::SendMessage, Api, ChannelId};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 pub struct Telegram {
-    api: Api,
+    token: String,
     rx: UnboundedReceiver<Message>,
     channel_id: ChannelId,
 }
@@ -16,7 +16,6 @@ pub struct Telegram {
 impl Logger for Telegram {
     fn new() -> (Telegram, Sender) {
         let token = env::var("TELEGRAM_BOT_TOKEN").expect("TELEGRAM_BOT_TOKEN not set.");
-        let api = Api::new(token);
 
         let channel_id = env::var("TELEGRAM_CHANNEL_ID")
             .expect("TELEGRAM_CHANNEL_ID not set.")
@@ -28,7 +27,7 @@ impl Logger for Telegram {
 
         (
             Telegram {
-                api,
+                token,
                 rx,
                 channel_id,
             },
@@ -36,50 +35,56 @@ impl Logger for Telegram {
         )
     }
 
-    async fn run(&mut self) {
+    async fn run(mut self) {
+        loop {
+            if let Err(err) = self.run_internal().await {
+                log::error!("Telegram error: {}", err);
+            }
+        }
+    }
+
+
+}
+
+impl Telegram {
+    async fn run_internal(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         log::info!("Starting logger.");
 
+        let api = Api::new(self.token.clone());
         /*
-        self.api
+        api
             .send(SendMessage::new(
                 self.channel_id,
                 "Trading bot was started. Let's get this bread!",
             ))
-            .await
-            .unwrap();
-        */
+            .await?;*/
 
         while let Some(message) = self.rx.recv().await {
             match message {
                 Message::Open(Position {
-                    mut market,
+                    market,
                     quantity,
                     buy_price,
                     take_profit,
                     stop_loss,
                 }) => {
-                    log::info!("Logger received open position.");
+                    log::info!("Logger received open position");
 
                     let base_quantity = quantity / buy_price;
-                    let base_take_profit = quantity / take_profit;
-                    let base_stop_loss = quantity / stop_loss;
                     let usdt_offset = market.find("USDT").unwrap();
-                    let asset: String = market.drain(..usdt_offset).collect();
+                    let asset: String = market.clone().drain(..usdt_offset).collect();
 
-                    self.api.send(SendMessage::new(
+                    api.send(SendMessage::new(
                         self.channel_id,
                         format!(
-                                "🔵 Opened Position\n\nPrice:\t {:.2} {}\nValue:\t {:.4} {}\t ({:.2} USDT)\nTake Profit:\t {:.4} {}\t ({:.2} USDT)\nStop Loss:\t {:.4} {}\t ({:.2} USDT)",
-                                buy_price, market,
-                                base_quantity, asset, quantity,
-                                base_take_profit, asset, take_profit,
-                                base_stop_loss, asset, stop_loss
+                                "🔵 Opened Position {}\n\nQuantity: {:.4} {} ({:.2} USDT)\nBuy Price: {:.4} USDT\nTake Profit: {:.4} USDT\nStop Loss: {:.4} USDT",
+                                market, base_quantity, asset, quantity, buy_price, take_profit, stop_loss
                             ),
-                    )).await.unwrap();
+                    )).await?;
                 },
                 Message::Close(
                     Position {
-                        mut market,
+                        market,
                         quantity,
                         buy_price,
                         take_profit,
@@ -91,33 +96,39 @@ impl Logger for Telegram {
 
                     let base_quantity = quantity / buy_price;
                     let usdt_offset = market.find("USDT").unwrap();
-                    let asset: String = market.drain(..usdt_offset).collect();
+                    let asset: String = market.clone().drain(..usdt_offset).collect();
 
                     if profitable {
                         let profit = take_profit / buy_price - Decimal::one();
-                        self.api.send(SendMessage::new(
+                        api.send(SendMessage::new(
                             self.channel_id,
                             format!(
-                                    "🟢 Closed Position\n\nPrice:\t {:.2} {}\nValue:\t {:.4} {}\t ({:.2} USDT)\n\nProfit:\t {:+.2}%\t ({:+.2} USDT)",
-                                    take_profit, market,
+                                    "🟢 Closed Position {}\n\nQuantity:\t {:.4} {}\t ({:.2} USDT)\nSell Price:\t {:.4} USDT\nProfit:\t {:+.2}%\t ({:+.2} USDT)",
+                                    market,
                                     base_quantity, asset, quantity,
+                                    take_profit,
                                     profit * Decimal::new(100, 0), profit * quantity
                                 ),
-                        )).await.unwrap();
+                        )).await?;
                     } else {
                         let loss = stop_loss / buy_price - Decimal::one();
-                        self.api.send(SendMessage::new(
+                        api.send(SendMessage::new(
                             self.channel_id,
                             format!(
-                                    "🔴 Closed Position\n\nPrice:\t {:.2} {}\nValue:\t {:.4} {}\t ({:.2} USDT)\n\nLoss:\t {:+.2}%\t ({:+.2} USDT)",
-                                    stop_loss, market,
+                                    "🔴 Closed Position {}\n\nQuantity:\t {:.4} {}\t ({:.2} USDT)\nSell Price:\t {:.4} USDT\nLoss:\t {:+.2}%\t ({:+.2} USDT)",
+                                    market,
                                     base_quantity, asset, quantity,
+                                    stop_loss,
                                     loss * Decimal::new(100, 0), loss * quantity
                                 ),
-                        )).await.unwrap();
+                        )).await?;
                     }
                 }
             }
         }
+
+        log::error!("Telegram logger terminated.");
+
+        Ok(())
     }
 }
