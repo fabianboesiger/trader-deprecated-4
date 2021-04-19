@@ -9,7 +9,7 @@ openlimits = { git = "https://github.com/fabianboesiger/openlimits" }
 rust_decimal = "1.10"
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
-sqlx = { version = "0.5", features = [ "postgres", "runtime-tokio-rustls", "decimal", "tls" ] }
+sqlx = { version = "0.5", features = [ "postgres", "runtime-tokio-rustls", "decimal", "tls", "chrono" ] }
 dotenv = "0.15"
 async-trait = "0.1"
 serde = "1.0"

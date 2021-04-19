@@ -48,7 +48,7 @@ impl Logger for Telegram {
 
 impl Telegram {
     async fn run_internal(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        log::info!("Starting logger.");
+        log::info!("Starting telegram logger.");
 
         let api = Api::new(self.token.clone());
         /*
@@ -67,6 +67,7 @@ impl Telegram {
                     buy_price,
                     take_profit,
                     stop_loss,
+                    ..
                 }) => {
                     log::info!("Logger received open position");
 
@@ -89,8 +90,9 @@ impl Telegram {
                         buy_price,
                         take_profit,
                         stop_loss,
-                    },
-                    profitable,
+                        profitable,
+                        ..
+                    }
                 ) => {
                     log::info!("Logger received close position.");
 
@@ -98,7 +100,7 @@ impl Telegram {
                     let usdt_offset = market.find("USDT").unwrap();
                     let asset: String = market.clone().drain(..usdt_offset).collect();
 
-                    if profitable {
+                    if profitable.unwrap() {
                         let profit = take_profit / buy_price - Decimal::one();
                         api.send(SendMessage::new(
                             self.channel_id,

@@ -1,8 +1,11 @@
 mod wallet;
+mod positions;
 
+pub use positions::Position;
+use positions::Positions;
 use super::{Exchange, Order, Strategy, Trade};
 use crate::{
-    loggers::{Logger, Message, Sender, Telegram},
+    loggers::{Logger, Database},
     Error, Market, Number,
 };
 use async_trait::async_trait;
@@ -30,73 +33,11 @@ use std::{
 use tokio::{
     sync::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Mutex,
     },
     time::{sleep, timeout, Duration},
 };
 use wallet::Wallet;
-
-#[derive(Debug, Clone)]
-pub struct Position {
-    pub market: Market,
-    pub quantity: Decimal,
-    pub buy_price: Decimal,
-    pub take_profit: Decimal,
-    pub stop_loss: Decimal,
-}
-
-struct Positions {
-    positions: Mutex<Vec<Position>>,
-    sender: Sender,
-}
-
-impl Positions {
-    fn new(sender: Sender) -> Self {
-        Positions {
-            positions: Mutex::new(Vec::new()),
-            sender,
-        }
-    }
-
-    async fn check(&self, market: &Market, price: Decimal) -> Option<bool> {
-        let mut positions = self.positions.lock().await;
-
-        let mut profitalbe = false;
-        let mut index = None;
-        for (i, position) in positions
-            .iter()
-            .enumerate()
-            .filter(|(_, position)| position.market == *market)
-        {
-            if price <= position.stop_loss {
-                index = Some(i);
-            }
-            if price >= position.take_profit {
-                index = Some(i);
-                profitalbe = true;
-            }
-        }
-
-        if let Some(index) = index {
-            log::info!("Closing postion: {:?}", positions.get(index).unwrap());
-
-            self.sender.send(Message::Close(
-                    positions.get(index).unwrap().clone(),
-                    profitalbe,
-                ));
-            positions.remove(index);
-            Some(profitalbe)
-        } else {
-            None
-        }
-    }
-
-    async fn open(&self, position: Position) {
-        log::info!("Opening postion: {:?}", position);
-        self.sender.send(Message::Open(position.clone()));
-        self.positions.lock().await.push(position);
-    }
-}
+use chrono::Utc;
 
 struct FilteredOrder {
     market: Market,
@@ -116,6 +57,8 @@ impl FilteredOrder {
             buy_price: self.buy_price,
             take_profit: self.take_profit_price,
             stop_loss: self.stop_price,
+            profitable: None,
+            timestamp: Utc::now(),
         }))
     }
 
@@ -165,9 +108,11 @@ impl FilteredOrder {
                 Some(Position {
                     market: self.market,
                     quantity: buy_order.size,
-                    buy_price: buy_order.price.unwrap(),
+                    buy_price: self.buy_price,
                     take_profit: self.take_profit_price,
                     stop_loss: self.stop_limit_price,
+                    profitable: None,
+                    timestamp: Utc::now()
                 })
             } else {
                 log::info!("Entry order was killed.");
@@ -334,9 +279,9 @@ impl Binance {
             )
             .collect();
 
-        let (telegram, sender) = Telegram::new();
+        let (logger, sender) = Database::new();
         tokio::task::spawn(async move {
-            telegram.run().await;
+            logger.run().await;
         });
 
         Self {

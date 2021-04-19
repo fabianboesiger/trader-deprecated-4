@@ -1,8 +1,10 @@
 mod telegram;
+mod database;
 
 use crate::exchanges::binance::Position;
 use async_trait::async_trait;
 pub use telegram::Telegram;
+pub use database::Database;
 use tokio::sync::mpsc::UnboundedSender;
 
 pub struct Sender(UnboundedSender<Message>);
@@ -23,7 +25,7 @@ impl From<UnboundedSender<Message>> for Sender {
 
 pub enum Message {
     Open(Position),
-    Close(Position, bool),
+    Close(Position),
 }
 
 #[async_trait]
