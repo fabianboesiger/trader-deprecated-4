@@ -167,7 +167,7 @@ impl FilteredOrder {
                     quantity: buy_order.size,
                     buy_price: buy_order.price.unwrap(),
                     take_profit: self.take_profit_price,
-                    stop_loss: self.stop_price,
+                    stop_loss: self.stop_limit_price,
                 })
             } else {
                 log::info!("Entry order was killed.");
