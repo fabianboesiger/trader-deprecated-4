@@ -65,7 +65,7 @@ impl FilteredOrder {
 
     #[cfg(not(feature = "stop-orders"))]
     async fn order(self, exchange: &OpenLimitsBinance) -> OpenLimitsResult<Option<Position>> {
-        println!("FilteredOrder: {:#?}", self);
+        log::info!("FilteredOrder: {:#?}", self);
 
         Ok(if self.quote_quantity > Decimal::zero() {
             log::info!("Placing entry order.");
@@ -246,13 +246,27 @@ pub struct Binance {
     positions: Positions,
     markets: Vec<Market>,
     exchange: OpenLimitsBinance,
-    filters: HashMap<Market, Filters>,
+    //filters: HashMap<Market, Filters>,
     consecutive_losses: AtomicU8,
     wait_until: AtomicU64,
     //start: u64,
 }
 
 impl Binance {
+    async fn get_filters(&self) -> HashMap<Market, Filters> {
+        let inner = self.exchange.inner_client().unwrap();
+        let info = inner.get_exchange_info().await.unwrap();
+        info
+            .symbols
+            .into_iter()
+            .map(
+                |openlimits::binance::model::Symbol {
+                     symbol, filters, ..
+                 }| { (symbol, Filters(filters)) },
+            )
+            .collect()
+    }
+
     pub async fn new(markets: Vec<&str>, sandbox: bool) -> Self {
         log::info!("Connecting to exchange.");
 
@@ -271,8 +285,8 @@ impl Binance {
 
         let inner = exchange.inner_client().unwrap();
         let start = inner.get_server_time().await.unwrap().server_time;
-        let info = inner.get_exchange_info().await.unwrap();
-        let filters = info
+        //let info = inner.get_exchange_info().await.unwrap();
+        /*let filters = info
             .symbols
             .into_iter()
             .map(
@@ -280,7 +294,7 @@ impl Binance {
                      symbol, filters, ..
                  }| { (symbol, Filters(filters)) },
             )
-            .collect();
+            .collect();*/
 
         let (logger, sender) = Database::new();
         tokio::task::spawn(async move {
@@ -293,7 +307,7 @@ impl Binance {
             positions: Positions::new(sender),
             markets: markets.into_iter().map(String::from).collect(),
             exchange,
-            filters,
+            //filters,
             consecutive_losses: AtomicU8::new(0),
             wait_until: AtomicU64::new(start),
             //start,
@@ -478,6 +492,7 @@ impl Binance {
         //let filters = self.filters.get(&order.market).unwrap();
         //filters.apply(order, quantity).unwrap();
 
+        self.get_filters().await;
         self.wallet.update(&self.exchange).await?;
         log::trace!("Wallet: {:#?}", self.wallet);
         let pair = self.exchange.get_pair(&order.market).await?.read()?;
@@ -497,8 +512,8 @@ impl Binance {
                     available,
                 ) * Decimal::new(99, 2);
                 log::info!("Placing order of size {}", quantity);
-                let filtered_order = self
-                    .filters
+                let filtered_order = self.get_filters()
+                    .await
                     .get(&order.market)
                     .unwrap()
                     .apply(order, quantity)?;
