@@ -67,7 +67,7 @@ async fn main() {
             "LINKUSDT",
         ];
         
-        Historical::new(Utc::now() - Duration::days(14), Utc::now(), false)
+        Historical::new(Utc.ymd(2021, 4, 1).and_hms(0, 0, 0), Utc::now(), false)
             .run(&mut strategy)
             .await;
         Binance::new(markets, false).await.run(&mut strategy).await;

@@ -487,10 +487,11 @@ impl Binance {
                 let total = self.wallet.total_value().await;
                 let want =
                     (total - Decimal::new(50, 0)) / Decimal::new(2, 0);
-                log::info!("Total value is {}, want {}", total, want);
+                let available = self.wallet.value(Wallet::QUOTE_ASSET).await;
+                    log::info!("Total value is {}, want {}, available {}", total, want, available);
                 let quantity = determine_investment_amount(
                     want,
-                    self.wallet.value(Wallet::QUOTE_ASSET).await,
+                    available,
                 ) * Decimal::new(99, 2);
                 log::info!("Placing order of size {}", quantity);
                 let filtered_order = self
@@ -558,6 +559,18 @@ mod tests {
         assert_eq!(
             determine_investment_amount(Decimal::new(70, 0), Decimal::new(50, 0)),
             Decimal::new(50, 0)
+        );
+        assert_eq!(
+            determine_investment_amount(Decimal::new(80, 0), Decimal::new(230, 0)),
+            Decimal::new(80, 0)
+        );
+        assert_eq!(
+            determine_investment_amount(Decimal::new(80, 0), Decimal::new(160, 0)),
+            Decimal::new(80, 0)
+        );
+        assert_eq!(
+            determine_investment_amount(Decimal::new(80, 0), Decimal::new(40, 0)),
+            Decimal::new(40, 0)
         );
     }
 }

@@ -7,6 +7,7 @@ use tokio::{
     fs::OpenOptions,
     io::{AsyncReadExt, AsyncWriteExt},
 };
+use futures::StreamExt;
 
 pub struct Historical {
     from: DateTime<Utc>,
@@ -23,9 +24,12 @@ impl Historical {
 #[async_trait]
 impl<S: Strategy + 'static> Exchange<S> for Historical {
     async fn run(self, strategy: &mut S) {
+        log::info!("Get historical data.");
+
         let uri = std::env::var("DATABASE_URL").expect("Couldn't get DATABASE_URL.");
         let pool = PgPool::connect(&uri).await.unwrap();
 
+        
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -50,6 +54,19 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
         } else {
             let trades = sqlx::query_as!(
                 Trade,
+                /*
+                r#"
+                SELECT
+                    market AS "market!",
+                    CAST(quantity AS REAL) AS "quantity!",
+                    CAST(price AS REAL) AS "price!",
+                    timestamp*1000*60 AS "timestamp!"
+                FROM trades
+                WHERE market = ANY($1)
+                AND timestamp > $2
+                AND timestamp <= $3
+                ORDER BY timestamp ASC"#,*/
+                
                 r#"
                 WITH
                 grouped AS (SELECT
@@ -69,6 +86,7 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                     timestamp*1000*60 AS "timestamp!"
                 FROM grouped
                 ORDER BY timestamp ASC"#,
+                
                 &vec![
                     "BTCUSDT",
                     "ETHUSDT",
@@ -105,5 +123,72 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
         for trade in trades {
             strategy.run(trade);
         }
+        
+        /*
+        let mut trades = sqlx::query_as!(
+            Trade,
+            /*
+            r#"
+            SELECT
+                market AS "market!",
+                CAST(quantity AS REAL) AS "quantity!",
+                CAST(price AS REAL) AS "price!",
+                timestamp*1000*60 AS "timestamp!"
+            FROM trades
+            WHERE market = ANY($1)
+            AND timestamp > $2
+            AND timestamp <= $3
+            ORDER BY timestamp ASC"#,
+            */
+            
+            r#"
+            WITH
+            grouped AS (SELECT
+                market,
+                CAST(SUM(quantity) AS REAL) AS quantity,
+                CAST(AVG(price) AS REAL) AS price,
+                timestamp/1000/60 AS timestamp
+            FROM trades
+            WHERE market = ANY($1)
+            AND timestamp > $2
+            AND timestamp <= $3
+            GROUP BY market, timestamp/1000/60)
+            SELECT
+                market AS "market!",
+                quantity AS "quantity!",
+                price AS  "price!",
+                timestamp*1000*60 AS "timestamp!"
+            FROM grouped
+            ORDER BY timestamp ASC"#,
+            
+            &vec![
+                "BTCUSDT",
+                "ETHUSDT",
+                "CHZUSDT",
+                "BNBUSDT",
+                "DOGEUSDT",
+                "ADAUSDT",
+                "BCHUSDT",
+                "XRPUSDT",
+                "LTCUSDT",
+                "EOSUSDT",
+                "DOTUSDT",
+                "THETAUSDT",
+                "LINKUSDT"
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<String>>(),
+            self.from.timestamp_millis(),
+            self.to.timestamp_millis(),
+        )
+        .fetch(&pool);
+
+        log::info!("Receiving trades.");
+
+        while let Some(Ok(trade)) = trades.next().await {
+            strategy.run(trade);
+        }
+        */
     }
 }
