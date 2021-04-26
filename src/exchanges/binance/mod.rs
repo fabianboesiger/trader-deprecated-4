@@ -39,6 +39,7 @@ use tokio::{
 use wallet::Wallet;
 use chrono::Utc;
 
+#[derive(Debug)]
 struct FilteredOrder {
     market: Market,
     buy_price: Decimal,
@@ -64,6 +65,8 @@ impl FilteredOrder {
 
     #[cfg(not(feature = "stop-orders"))]
     async fn order(self, exchange: &OpenLimitsBinance) -> OpenLimitsResult<Option<Position>> {
+        println!("FilteredOrder: {:#?}", self);
+
         Ok(if self.quote_quantity > Decimal::zero() {
             log::info!("Placing entry order.");
 
