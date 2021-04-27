@@ -94,7 +94,7 @@ impl<S: Strategy> Strategy for Simulated<S> {
                 self.consecutive_losses += 1;
                 if self.consecutive_losses >= 2 {
                     self.consecutive_losses = 0;
-                    self.wait_until = timestamp + 1000 * 60 * 60 * 12;
+                    self.wait_until = timestamp + 1000 * 60 * 60 * 24;
                 }
             } else {
                 self.consecutive_losses = 0;

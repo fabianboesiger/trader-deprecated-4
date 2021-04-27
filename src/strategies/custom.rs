@@ -69,13 +69,13 @@ impl Strategy for Custom {
         self.macd_long.run(price);
 
         let max_stdev = self.stdev.get().min(price * 0.05);
-        //let trend = self.macd_long.get();
+        let trend = self.macd_long.get();
         let momentum = self.macd.get_hist();
         let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 1.8;
         let mean_reversal = !is_undervalued && self.was_undervalued;
         let worth_it = 1.4 * max_stdev > price * 0.01;
         let has_momentum = momentum > 0.0;
-        //let is_bullish = trend > 0.0;
+        let is_bullish = trend > 0.0;
         let no_backoff = self.bought_at + 1000 * 60 * 60 * 12 < timestamp;
 
         #[cfg(feature = "plot")]
@@ -104,8 +104,8 @@ impl Strategy for Custom {
         let action = if
             mean_reversal &&
             worth_it &&
-            has_momentum &&
-            //is_bullish &&
+            //has_momentum &&
+            is_bullish &&
             no_backoff
         {
             self.bought_at = timestamp;

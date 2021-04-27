@@ -404,7 +404,7 @@ impl Binance {
                                         self.consecutive_losses.fetch_add(1, Ordering::Relaxed);
                                         if self.consecutive_losses.load(Ordering::Relaxed) >= 2 {
                                             self.wait_until.store(
-                                                timestamp as u64 + 1000 * 60 * 60 * 12,
+                                                timestamp as u64 + 1000 * 60 * 60 * 24,
                                                 Ordering::Relaxed,
                                             );
                                             self.consecutive_losses.store(0, Ordering::Relaxed);
