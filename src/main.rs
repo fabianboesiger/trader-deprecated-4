@@ -26,6 +26,27 @@ async fn main() {
 
     #[allow(unused_mut)]
     let mut strategy = Duplicated::new(Interval::new(Custom::new(), 1000 * 60));
+    let markets = vec![
+        "BTCUSDT",
+        "ETHUSDT",
+        "CHZUSDT",
+        "BNBUSDT",
+        "DOGEUSDT",
+        "ADAUSDT",
+        "BCHUSDT",
+        "XRPUSDT",
+        "LTCUSDT",
+        "EOSUSDT",
+        "DOTUSDT",
+        "THETAUSDT",
+        "LINKUSDT",
+
+        "XMRUSDT",
+        "XLMUSDT",
+        "BTTUSDT",
+        "TRXUSDT",
+        "VETUSDT",
+    ];
 
     #[cfg(not(feature = "live"))]
     {
@@ -33,9 +54,14 @@ async fn main() {
 
         let mut simulated = Multi::new()
             .with(Simulated::new(Hold::new(), 0.001, 13))
-            .with(Simulated::new(strategy, 0.001, 2));
+            .with(Simulated::new(strategy, 0.001, 1));
 
-        Historical::new(Utc.ymd(2021, 4, 1).and_hms(0, 0, 0), Utc::now(), true)
+        Historical::new(
+            &markets,
+            Utc.ymd(2021, 4, 1).and_hms(0, 0, 0),
+            Utc::now(),
+            true
+        )
             .run(&mut simulated)
             .await;
 
@@ -51,25 +77,16 @@ async fn main() {
 
         log::warn!("Trading on live exchange.");
 
-        let markets = vec![
-            "BTCUSDT",
-            "ETHUSDT",
-            "CHZUSDT",
-            "BNBUSDT",
-            "DOGEUSDT",
-            "ADAUSDT",
-            "BCHUSDT",
-            "XRPUSDT",
-            "LTCUSDT",
-            "EOSUSDT",
-            "DOTUSDT",
-            "THETAUSDT",
-            "LINKUSDT",
-        ];
         
-        Historical::new(Utc.ymd(2021, 4, 1).and_hms(0, 0, 0), Utc::now(), false)
+        
+        Historical::new(
+            &markets,
+            Utc.ymd(2021, 4, 1).and_hms(0, 0, 0),
+            Utc::now(),
+            false
+        )
             .run(&mut strategy)
             .await;
-        Binance::new(markets, false).await.run(&mut strategy).await;
+        Binance::new(&markets, false).await.run(&mut strategy).await;
     }
 }

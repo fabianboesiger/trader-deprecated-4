@@ -267,7 +267,7 @@ impl Binance {
             .collect()
     }
 
-    pub async fn new(markets: Vec<&str>, sandbox: bool) -> Self {
+    pub async fn new(markets: &Vec<&str>, sandbox: bool) -> Self {
         log::info!("Connecting to exchange.");
 
         let exchange = OpenLimitsBinance::new(BinanceParameters {
@@ -305,7 +305,7 @@ impl Binance {
             sandbox,
             wallet: Wallet::new(),
             positions: Positions::new(sender),
-            markets: markets.into_iter().map(String::from).collect(),
+            markets: markets.clone().into_iter().map(String::from).collect(),
             exchange,
             //filters,
             consecutive_losses: AtomicU8::new(0),

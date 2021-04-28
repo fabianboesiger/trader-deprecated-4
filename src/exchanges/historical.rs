@@ -10,14 +10,15 @@ use tokio::{
 use futures::StreamExt;
 
 pub struct Historical {
+    markets: Vec<&'static str>,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
     cache: bool,
 }
 
 impl Historical {
-    pub fn new(from: DateTime<Utc>, to: DateTime<Utc>, cache: bool) -> Self {
-        Self { from, to, cache }
+    pub fn new(markets: &Vec<&'static str>, from: DateTime<Utc>, to: DateTime<Utc>, cache: bool) -> Self {
+        Self { markets: markets.clone(), from, to, cache }
     }
 }
 
@@ -87,21 +88,7 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                 FROM grouped
                 ORDER BY timestamp ASC"#,
                 
-                &vec![
-                    "BTCUSDT",
-                    "ETHUSDT",
-                    "CHZUSDT",
-                    "BNBUSDT",
-                    "DOGEUSDT",
-                    "ADAUSDT",
-                    "BCHUSDT",
-                    "XRPUSDT",
-                    "LTCUSDT",
-                    "EOSUSDT",
-                    "DOTUSDT",
-                    "THETAUSDT",
-                    "LINKUSDT"
-                ]
+                &self.markets
                 .into_iter()
                 .map(String::from)
                 .collect::<Vec<String>>(),
