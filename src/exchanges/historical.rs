@@ -46,7 +46,7 @@ impl<S: Strategy + 'static> Exchange<S> for Historical {
                 .duration_since(metadata.modified().unwrap())
                 .unwrap()
                 .as_secs()
-                < 3600 * 4
+                < 3600 * 8
             && self.cache
         {
             let mut bin = Vec::new();
