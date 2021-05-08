@@ -33,7 +33,7 @@ impl Custom {
         Self {
             val: Val::new(20000.0, 20000.0),
             diff: Ema::new(200.0),
-            macd_long: Macd::new(1000.0, 1500.0, 1.0),
+            macd_long: Macd::new(1000.0, 1300.0, 1.0),
             diff_stdev: Stdev::new(2000.0),
             was_undervalued: false,
             bought_at: 0,
@@ -60,9 +60,9 @@ impl Strategy for Custom {
         self.diff_stdev.run(self.diff.get());
         self.macd_long.run(price);
 
-        let window = self.diff.get().abs();
+        let window = self.diff.get().abs().min(price * 0.1);
         let trend = self.macd_long.get();
-        let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 1.8;
+        let is_undervalued = self.diff.get() < -self.diff_stdev.get() * 2.2;
         let mean_reversal = !is_undervalued && self.was_undervalued;
         let worth_it = window > price * 0.01;
         let is_bullish = trend > 0.0;

@@ -54,7 +54,7 @@ async fn main() {
 
         let mut simulated = Multi::new()
             .with(Simulated::new(Hold::new(), 0.001, 13))
-            .with(Simulated::new(strategy, 0.001, 1));
+            .with(Simulated::new(strategy, 0.001, 2));
 
         Historical::new(
             &markets,
